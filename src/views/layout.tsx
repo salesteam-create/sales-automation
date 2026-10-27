@@ -1,14 +1,8 @@
 import type { Child, FC } from 'hono/jsx';
 import { followupText, formatShort, relativeDay } from '../dates';
+import type { Nav } from '../reports';
 import { Icon, Mark } from './icons';
 import { CSS_VERSION } from './theme';
-
-// Counts shown beside the sidebar items. Every page loads them, so they are current on every screen.
-export interface Nav {
-  today: number;
-  agencies: number;
-  importIssues: number;
-}
 
 export const EMPTY_NAV: Nav = { today: 0, agencies: 0, importIssues: 0 };
 
