@@ -17,8 +17,10 @@ import {
   setNextFollowup,
 } from './db';
 import { buildImportPlan, planStatements } from './import';
+import { getChanges, getIntel, getPages, refreshAgencyStep, runCrawlTick, type IntelEnv } from './intel';
 import { redact } from './redact';
 import { loadDashboard, loadFeed, refreshNextSteps, runDailyJob, type Range } from './reports';
+import { PAGE_KINDS } from './web';
 import { FRAMEWORK_OPTIONS, isAllowedCombo, isLeadStatus, isStatus, nextFollowupDate, statusForLead } from './rules';
 import {
   AgencyListPage,
@@ -33,13 +35,14 @@ import {
   type ImportIssueRow,
 } from './views/pages';
 
-export interface Env {
+export interface Env extends IntelEnv {
   DB: D1Database;
-  GEMINI_API_KEY?: string;
-  GEMINI_MODEL: string;
   CURRENCY: string;
   NEXT_STEPS_DAILY_LIMIT?: string;
 }
+
+// Must match the crons in wrangler.toml.
+const CRAWL_CRON = '*/2 18-23,0 * * *';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -111,7 +114,7 @@ app.get('/agencies/:id', async (c) => {
   const agency = await loadAgencyOr404(c);
   if (!agency) return c.notFound();
   const db = c.env.DB;
-  const [contacts, timeline, suggestions, issues] = await Promise.all([
+  const [contacts, timeline, suggestions, issues, intel, pages, changes] = await Promise.all([
     getContacts(db, agency.id),
     getTimeline(db, agency.id),
     pendingSuggestions(db, agency.id),
@@ -119,6 +122,9 @@ app.get('/agencies/:id', async (c) => {
       .prepare(`SELECT i.*, NULL AS agency_name FROM import_issues i WHERE agency_id = ? AND resolved = 0 ORDER BY id`)
       .bind(agency.id)
       .all<ImportIssueRow>(),
+    getIntel(db, agency.id),
+    getPages(db, agency.id),
+    getChanges(db, agency.id),
   ]);
   return c.html(
     <AgencyPage
@@ -127,6 +133,9 @@ app.get('/agencies/:id', async (c) => {
       timeline={timeline}
       suggestions={suggestions}
       issues={issues.results}
+      intel={intel}
+      pages={pages}
+      changes={changes}
       today={todayIST()}
       currency={c.env.CURRENCY}
       msg={c.req.query('msg')}
@@ -141,11 +150,19 @@ app.post('/agencies/:id/edit', async (c) => {
   const f = await c.req.parseBody();
   const framework = (FRAMEWORK_OPTIONS as readonly string[]).includes(str(f.framework)) ? str(f.framework) : null;
   const value = str(f.deal_value) === '' ? null : Number(f.deal_value);
+  const website = orNull(f.website);
+  if (website !== agency.website) {
+    // A new website means new pages to find and a fresh scan.
+    await c.env.DB.batch([
+      c.env.DB.prepare('DELETE FROM watched_pages WHERE agency_id = ?').bind(agency.id),
+      c.env.DB.prepare('UPDATE agencies SET pages_discovered_at = NULL, intel_stale = 1 WHERE id = ?').bind(agency.id),
+    ]);
+  }
   await c.env.DB.prepare(
     `UPDATE agencies SET name = ?, website = ?, country = ?, framework = ?, deal_description = ?, deal_value = ?,
      updated_at = datetime('now') WHERE id = ?`,
   )
-    .bind(str(f.name) || agency.name, orNull(f.website), orNull(f.country), framework, orNull(f.deal_description), Number.isFinite(value) ? value : null, agency.id)
+    .bind(str(f.name) || agency.name, website, orNull(f.country), framework, orNull(f.deal_description), Number.isFinite(value) ? value : null, agency.id)
     .run();
   return back(c, `/agencies/${agency.id}`, '', 'Details saved.');
 });
@@ -210,6 +227,42 @@ app.post('/agencies/:id/next-steps', async (c) => {
     if (!(err instanceof AiUnavailableError)) throw err;
     return c.redirect(`/agencies/${agency.id}?error=${encodeURIComponent(err.message)}`, 303);
   }
+});
+
+// ---------- website intelligence ----------
+
+app.post('/agencies/:id/web/step', async (c) => {
+  const id = Number(c.req.param('id'));
+  const f = await c.req.parseBody();
+  // Same format as SQLite datetime('now'), so it compares with last_checked_at.
+  const since = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(str(f.since)) ? str(f.since) : new Date().toISOString().replace('T', ' ').slice(0, 19);
+  const r = await refreshAgencyStep(c.env.DB, c.env, id, since);
+  return c.json({ ...r, since });
+});
+
+app.post('/agencies/:id/pages', async (c) => {
+  const agency = await loadAgencyOr404(c);
+  if (!agency) return c.notFound();
+  const f = await c.req.parseBody();
+  const kind = str(f.kind);
+  let url: string | null = null;
+  try {
+    url = /^https?:$/.test(new URL(str(f.url)).protocol) ? new URL(str(f.url)).toString() : null;
+  } catch {
+    url = null;
+  }
+  if (url && (PAGE_KINDS as readonly string[]).includes(kind)) {
+    await c.env.DB.prepare('INSERT INTO watched_pages (agency_id, kind, url) VALUES (?, ?, ?) ON CONFLICT(agency_id, url) DO UPDATE SET kind = excluded.kind')
+      .bind(agency.id, kind, url)
+      .run();
+    return back(c, `/agencies/${agency.id}`, '', 'Page added. It is checked tonight, or use Refresh now.');
+  }
+  return c.redirect(`/agencies/${agency.id}?error=${encodeURIComponent('Please enter a full web address starting with https://')}`, 303);
+});
+
+app.post('/pages/:pid/delete', async (c) => {
+  const row = await c.env.DB.prepare('DELETE FROM watched_pages WHERE id = ? RETURNING agency_id').bind(Number(c.req.param('pid'))).first<{ agency_id: number }>();
+  return back(c, row ? `/agencies/${row.agency_id}` : '/agencies', '', 'Page no longer watched.');
 });
 
 // ---------- logging a meeting ----------
@@ -317,7 +370,9 @@ app.post('/import', async (c) => {
   } catch (err) {
     return c.html(<ImportPage hasData={exists} error={(err as Error).message} />, 400);
   }
-  const wipe = ['import_issues', 'suggestions', 'timeline', 'contacts', 'agencies'].map((t) => db.prepare(`DELETE FROM ${t}`));
+  const wipe = ['web_changes', 'agency_intel', 'watched_pages', 'import_issues', 'suggestions', 'timeline', 'contacts', 'agencies'].map((t) =>
+    db.prepare(`DELETE FROM ${t}`),
+  );
   await db.batch([...wipe, ...planStatements(db, plan)]);
   return c.redirect(
     `/import/report?msg=${encodeURIComponent(`Imported ${plan.agencies.length} agencies. ${plan.issues.length} rows need a look.`)}`,
@@ -341,7 +396,11 @@ app.post('/import-issues/:iid/resolve', async (c) => {
 
 export default {
   fetch: app.fetch,
-  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
+  async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext) {
+    if (event.cron === CRAWL_CRON) {
+      ctx.waitUntil(runCrawlTick(env.DB, env).then((log) => console.log(`Crawl tick: ${log}`)));
+      return;
+    }
     ctx.waitUntil(
       runDailyJob(env.DB, env, todayIST()).then((r) => console.log(`Daily job: refreshed ${r.refreshed} agencies${r.error ? `, stopped: ${r.error}` : ''}`)),
     );

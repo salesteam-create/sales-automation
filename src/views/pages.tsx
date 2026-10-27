@@ -2,8 +2,10 @@ import type { FC } from 'hono/jsx';
 import type { NoteAnalysis } from '../ai';
 import { formatDay } from '../dates';
 import type { Agency, Contact, Suggestion, TimelineEntry } from '../db';
+import { CHANGE_LABELS, type AgencyIntel, type WatchedPage, type WebChange } from '../intel';
 import type { Dashboard, Feed, Range } from '../reports';
 import { ALLOWED_COMBOS, FRAMEWORK_OPTIONS, LEAD_STATUSES, STATUSES, TIMELINE_TYPES } from '../rules';
+import { PAGE_KINDS, PAGE_KIND_LABELS } from '../web';
 import { Due, Layout, Notice, Pill } from './layout';
 
 export interface ImportIssueRow {
@@ -59,7 +61,7 @@ const SuggestionItem: FC<{ s: Suggestion; back: string; showAgency?: boolean }> 
       Move <Pill value={s.from_status} /> <Pill value={s.from_lead_status} /> to <Pill value={s.to_status} /> <Pill value={s.to_lead_status} />
     </div>
     <div class="small muted">
-      {s.source === 'no_reply' ? 'No-reply rule' : 'AI, from meeting notes'}: {s.reason}
+      {s.source === 'no_reply' ? 'No-reply rule' : s.source === 'web' ? 'Website signal' : 'AI, from meeting notes'}: {s.reason}
     </div>
     <div class="row small" style="margin-top:6px">
       <form class="inline" method="post" action={`/suggestions/${s.id}/accept`}>
@@ -97,6 +99,27 @@ const AgencyLine: FC<{ a: Agency; today: string; back: string }> = ({ a, today, 
   </div>
 );
 
+const ChangeItem: FC<{ c: WebChange; showAgency?: boolean }> = ({ c, showAgency }) => (
+  <div class="item">
+    <div class="row small">
+      {showAgency && (
+        <a href={`/agencies/${c.agency_id}`}>
+          <b>{c.agency_name}</b>
+        </a>
+      )}
+      {c.is_opportunity ? <span class="pill ok">Opportunity</span> : null}
+      <span class="pill">{c.label ? CHANGE_LABELS[c.label] ?? c.label : 'Not labelled yet'}</span>
+      <span class="muted">{c.detected_at.slice(0, 10)}</span>
+      <a href={c.page_url} target="_blank" rel="noopener" class="muted">
+        {c.page_kind} page
+      </a>
+    </div>
+    <div>{c.title ?? 'Website updated'}</div>
+    {c.summary && <div class="small muted">{c.summary}</div>}
+    {c.opportunity_reason && <div class="small">Why it matters: {c.opportunity_reason}</div>}
+  </div>
+);
+
 function Collapsible<T>({ items, limit, render }: { items: T[]; limit: number; render: (t: T) => unknown }) {
   if (items.length <= limit) return <>{items.map(render)}</>;
   return (
@@ -113,7 +136,8 @@ function Collapsible<T>({ items, limit, render }: { items: T[]; limit: number; r
 // ---------- Today (daily feed) ----------
 
 export const FeedPage: FC<{ feed: Feed; today: string; msg?: string | null }> = ({ feed, today, msg }) => {
-  const quiet = !feed.overdue.length && !feed.dueToday.length && !feed.suggestions.length && !feed.yesterday.length;
+  const quiet =
+    !feed.overdue.length && !feed.dueToday.length && !feed.suggestions.length && !feed.webUpdates.length && !feed.yesterday.length;
   return (
     <Layout title="Today" active="feed">
       <h1>Today</h1>
@@ -142,10 +166,12 @@ export const FeedPage: FC<{ feed: Feed; today: string; msg?: string | null }> = 
           ))}
         </section>
       )}
-      <section class="card">
-        <h2>Website updates</h2>
-        <p class="muted small">Coming in phase 2: overnight changes on agency websites will appear here.</p>
-      </section>
+      {feed.webUpdates.length > 0 && (
+        <section class="card">
+          <h2>Website updates ({feed.webUpdates.length})</h2>
+          <Collapsible items={feed.webUpdates} limit={10} render={(c) => <ChangeItem c={c} showAgency />} />
+        </section>
+      )}
       {feed.yesterday.length > 0 && (
         <section class="card">
           <h2>Yesterday</h2>
@@ -279,8 +305,12 @@ export const DashboardPage: FC<{ d: Dashboard; range: Range; today: string; curr
       </section>
 
       <section class="card">
-        <h2>5. Today's web updates</h2>
-        <p class="muted small">Coming in phase 2.</p>
+        <h2>5. Today's web updates ({d.webUpdates.length})</h2>
+        <p class="muted small">
+          Changes found on agency websites in the last 24 hours. {d.webUpdates.filter((c) => c.is_opportunity).length} flagged as opportunities.
+        </p>
+        {d.webUpdates.length === 0 && <p class="muted">No website updates in the last 24 hours.</p>}
+        <Collapsible items={d.webUpdates} limit={6} render={(c) => <ChangeItem c={c} showAgency />} />
       </section>
     </Layout>
   );
@@ -483,11 +513,14 @@ export const AgencyPage: FC<{
   timeline: TimelineEntry[];
   suggestions: Suggestion[];
   issues: ImportIssueRow[];
+  intel: AgencyIntel | null;
+  pages: WatchedPage[];
+  changes: WebChange[];
   today: string;
   currency: string;
   msg?: string | null;
   error?: string | null;
-}> = ({ agency: a, contacts, timeline, suggestions, issues, today, currency, msg, error }) => {
+}> = ({ agency: a, contacts, timeline, suggestions, issues, intel, pages, changes, today, currency, msg, error }) => {
   const back = `/agencies/${a.id}`;
   const steps = a.next_steps ? (JSON.parse(a.next_steps) as string[]) : [];
   return (
@@ -563,6 +596,8 @@ export const AgencyPage: FC<{
           ))}
         </section>
       )}
+
+      <IntelSection agency={a} intel={intel} pages={pages} changes={changes} />
 
       {issues.length > 0 && (
         <section class="card">
@@ -688,6 +723,122 @@ export const AgencyPage: FC<{
       </section>
       <script dangerouslySetInnerHTML={{ __html: comboScript }} />
     </Layout>
+  );
+};
+
+// ---------- Intelligence ----------
+
+// Runs the refresh one small step at a time so each request stays within free-plan limits.
+const refreshScript = (id: number) => `
+(function(){var b=document.getElementById('intel-refresh'),o=document.getElementById('intel-progress');if(!b)return;
+b.addEventListener('click',function(){b.disabled=true;var since='';var n=0;
+function step(){fetch('/agencies/${id}/web/step',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:'since='+encodeURIComponent(since)})
+.then(function(r){return r.json()}).then(function(r){since=r.since;o.textContent=r.message;n++;
+if(r.done||n>15){location.reload()}else{step()}}).catch(function(){o.textContent='Refresh failed. Try again later.';b.disabled=false})}
+o.textContent='Reading website...';step();});})();`;
+
+const IntelSection: FC<{ agency: Agency; intel: AgencyIntel | null; pages: WatchedPage[]; changes: WebChange[] }> = ({ agency: a, intel, pages, changes }) => {
+  const lastChecked = pages.map((p) => p.last_checked_at).filter(Boolean).sort().at(-1);
+  return (
+    <section class="card">
+      <div class="row" style="justify-content:space-between">
+        <h2>Intelligence</h2>
+        {a.website && (
+          <div class="row small">
+            <span class="muted" id="intel-progress">
+              {lastChecked ? `Last checked ${lastChecked.slice(0, 16)} UTC` : 'Not checked yet'}
+            </span>
+            <button id="intel-refresh" type="button">
+              Refresh now
+            </button>
+          </div>
+        )}
+      </div>
+      {!a.website ? (
+        <p class="muted">No website, intelligence unavailable. Add the agency's website under Details to start.</p>
+      ) : !intel ? (
+        <p class="muted small">Not scanned yet. The first scan runs overnight, or use Refresh now.</p>
+      ) : (
+        <>
+          {intel.summary && <p>{intel.summary}</p>}
+          <p class="small muted">Based on their website, checked {intel.updated_at.slice(0, 10)}. Websites rarely list everything an agency does, so treat these as leads to verify.</p>
+          <div class="grid g2">
+            <div>
+              <h3>Their services</h3>
+              <p class="small">{intel.their_services.join(', ') || 'Not clear from the website'}</p>
+              {intel.platforms.length > 0 && (
+                <>
+                  <h3>Platforms</h3>
+                  <p class="small">{intel.platforms.join(', ')}</p>
+                </>
+              )}
+            </div>
+            <div>
+              <h3>Service gaps to pitch</h3>
+              {intel.gaps.length ? (
+                <ul class="small steps">
+                  {intel.gaps.map((g) => (
+                    <li>
+                      <b>{g.service}</b>: {g.pitch}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p class="small muted">None found.</p>
+              )}
+            </div>
+          </div>
+          <h3>Upsell potential</h3>
+          {intel.upsell.length ? (
+            <ul class="small steps">
+              {intel.upsell.map((u) => (
+                <li>
+                  {u.finding} <b>→</b> {u.suggestion}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p class="small muted">Nothing specific from their case studies yet.</p>
+          )}
+        </>
+      )}
+
+      {a.website && (
+        <>
+          <h3 style="margin-top:14px">Website activity</h3>
+          {changes.length === 0 ? (
+            <p class="small muted">No changes found yet. The first check sets the baseline; changes show from the next check on.</p>
+          ) : (
+            <Collapsible items={changes} limit={5} render={(c) => <ChangeItem c={c} />} />
+          )}
+          <details class="small" style="margin-top:10px">
+            <summary>Watched pages ({pages.length})</summary>
+            {pages.map((p) => (
+              <div class="item row">
+                <span class="pill">{PAGE_KIND_LABELS[p.kind] ?? p.kind}</span>
+                <a href={p.url} target="_blank" rel="noopener">
+                  {p.url.replace(/^https?:\/\/(www\.)?/, '')}
+                </a>
+                {p.last_status === 'error' && <span class="overdue">Couldn't check: {p.last_error}</span>}
+                <form class="inline" method="post" action={`/pages/${p.id}/delete`}>
+                  <button class="link small">Stop watching</button>
+                </form>
+              </div>
+            ))}
+            <form class="row" method="post" action={`/agencies/${a.id}/pages`} style="margin-top:8px">
+              <select name="kind" style="width:auto">
+                {PAGE_KINDS.map((k) => (
+                  <option value={k}>{PAGE_KIND_LABELS[k]}</option>
+                ))}
+              </select>
+              <input type="url" name="url" placeholder="https://..." required style="width:auto;flex:1 1 220px" />
+              <button>Watch page</button>
+            </form>
+          </details>
+          <script dangerouslySetInnerHTML={{ __html: refreshScript(a.id) }} />
+        </>
+      )}
+    </section>
   );
 };
 

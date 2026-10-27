@@ -3,6 +3,7 @@
 import { suggestNextSteps, AiUnavailableError, type AiEnv } from './ai';
 import { addDays } from './dates';
 import { historyForAi, pendingSuggestions, saveNextSteps, type Agency, type Suggestion, type TimelineEntry } from './db';
+import { CHANGE_LABELS, getChanges, getIntel, recentChanges, takeAiCall, type IntelEnv, type WebChange } from './intel';
 import { STATUSES } from './rules';
 
 export type Range = 'week' | 'month' | 'quarter' | 'all';
@@ -31,6 +32,7 @@ export interface Dashboard {
   overdue: Agency[];
   dueToday: Agency[];
   suggestions: Suggestion[];
+  webUpdates: WebChange[];
 }
 
 export async function loadDashboard(db: D1Database, range: Range, today: string): Promise<Dashboard> {
@@ -38,7 +40,7 @@ export async function loadDashboard(db: D1Database, range: Range, today: string)
   const rangeSql = start ? `WHERE ${FIRST_MET} >= ?` : '';
   const rangeBinds = start ? [start] : [];
 
-  const [statusRows, countryRows, deals, overdue, dueToday, suggestions] = await Promise.all([
+  const [statusRows, countryRows, deals, overdue, dueToday, suggestions, webUpdates] = await Promise.all([
     db.prepare(`SELECT a.status, COUNT(*) AS n FROM agencies a ${rangeSql} GROUP BY a.status`).bind(...rangeBinds).all<{ status: string; n: number }>(),
     db
       .prepare(`SELECT COALESCE(a.country, 'Unknown') AS country, a.status, COUNT(*) AS n FROM agencies a ${rangeSql} GROUP BY 1, 2`)
@@ -54,6 +56,7 @@ export async function loadDashboard(db: D1Database, range: Range, today: string)
     db.prepare(`SELECT * FROM agencies WHERE next_followup_date < ? ORDER BY next_followup_date, name`).bind(today).all<Agency>(),
     db.prepare(`SELECT * FROM agencies WHERE next_followup_date = ? ORDER BY name`).bind(today).all<Agency>(),
     pendingSuggestions(db),
+    recentChanges(db),
   ]);
 
   const counts = new Map(statusRows.results.map((r) => [r.status, r.n]));
@@ -75,6 +78,7 @@ export async function loadDashboard(db: D1Database, range: Range, today: string)
     overdue: overdue.results,
     dueToday: dueToday.results,
     suggestions,
+    webUpdates,
   };
 }
 
@@ -82,6 +86,7 @@ export interface Feed {
   overdue: Agency[];
   dueToday: Agency[];
   suggestions: Suggestion[];
+  webUpdates: WebChange[];
   yesterday: (TimelineEntry & { agency_name: string })[];
 }
 
@@ -94,10 +99,11 @@ function istDayToUtcRange(day: string): [string, string] {
 
 export async function loadFeed(db: D1Database, today: string): Promise<Feed> {
   const [from, to] = istDayToUtcRange(addDays(today, -1));
-  const [overdue, dueToday, suggestions, yesterday] = await Promise.all([
+  const [overdue, dueToday, suggestions, webUpdates, yesterday] = await Promise.all([
     db.prepare(`SELECT * FROM agencies WHERE next_followup_date < ? ORDER BY next_followup_date, name`).bind(today).all<Agency>(),
     db.prepare(`SELECT * FROM agencies WHERE next_followup_date = ? ORDER BY name`).bind(today).all<Agency>(),
     pendingSuggestions(db),
+    recentChanges(db),
     db
       .prepare(
         `SELECT t.*, a.name AS agency_name FROM timeline t JOIN agencies a ON a.id = t.agency_id
@@ -106,7 +112,22 @@ export async function loadFeed(db: D1Database, today: string): Promise<Feed> {
       .bind(from, to)
       .all<TimelineEntry & { agency_name: string }>(),
   ]);
-  return { overdue: overdue.results, dueToday: dueToday.results, suggestions, yesterday: yesterday.results };
+  return { overdue: overdue.results, dueToday: dueToday.results, suggestions, webUpdates, yesterday: yesterday.results };
+}
+
+// Website intelligence and recent changes, as plain text for the next-steps prompt. Website content is public.
+async function intelForAi(db: D1Database, agencyId: number): Promise<string> {
+  const [intel, changes] = await Promise.all([getIntel(db, agencyId), getChanges(db, agencyId, 5)]);
+  const lines: string[] = [];
+  if (intel) {
+    if (intel.their_services.length) lines.push(`Their services: ${intel.their_services.join(', ')}`);
+    if (intel.gaps.length) lines.push(`Kilowott services they lack: ${intel.gaps.map((g) => g.service).join(', ')}`);
+    for (const u of intel.upsell) lines.push(`Upsell: ${u.finding} -> ${u.suggestion}`);
+  }
+  for (const c of changes.filter((c) => c.label && c.label !== 'other')) {
+    lines.push(`${c.detected_at.slice(0, 10)} ${CHANGE_LABELS[c.label!] ?? c.label}: ${c.title}${c.is_opportunity ? ' (opportunity)' : ''}`);
+  }
+  return lines.join('\n');
 }
 
 export async function refreshNextSteps(db: D1Database, env: AiEnv, agency: Agency, today: string): Promise<string[]> {
@@ -120,13 +141,14 @@ export async function refreshNextSteps(db: D1Database, env: AiEnv, agency: Agenc
     unanswered: agency.unanswered_count,
     deal: [agency.deal_description, agency.deal_value != null ? String(agency.deal_value) : null].filter(Boolean).join(', ') || null,
     history: await historyForAi(db, agency.id),
+    intel: await intelForAi(db, agency.id),
   });
   await saveNextSteps(db, agency.id, steps);
   return steps;
 }
 
 // Daily job: refresh AI next steps only where something is new or due, to stay inside free AI limits.
-export async function runDailyJob(db: D1Database, env: AiEnv & { NEXT_STEPS_DAILY_LIMIT?: string }, today: string): Promise<{ refreshed: number; error?: string }> {
+export async function runDailyJob(db: D1Database, env: IntelEnv & { NEXT_STEPS_DAILY_LIMIT?: string }, today: string): Promise<{ refreshed: number; error?: string }> {
   const limit = Number(env.NEXT_STEPS_DAILY_LIMIT ?? '20') || 20;
   const candidates = await db
     .prepare(
@@ -140,6 +162,7 @@ export async function runDailyJob(db: D1Database, env: AiEnv & { NEXT_STEPS_DAIL
     .all<Agency>();
   let refreshed = 0;
   for (const agency of candidates.results) {
+    if (!(await takeAiCall(db, env, true))) return { refreshed, error: 'AI daily budget reached' };
     try {
       await refreshNextSteps(db, env, agency, today);
       refreshed++;

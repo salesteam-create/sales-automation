@@ -9,6 +9,11 @@ GEMINI_MODEL = "gemini-2.5-flash"
 CURRENCY = "EUR"
 # Max agencies whose AI next steps are refreshed per daily run (keeps within free-tier limits).
 NEXT_STEPS_DAILY_LIMIT = "20"
+# Max background AI calls per IST day (website labelling, intelligence, next steps). Lower it if Gemini's free tier refuses.
+AI_DAILY_BUDGET = "200"
+# Work done per 2-minute overnight tick. Kept small for the Workers free plan; raise on a paid plan.
+CRAWL_PAGES_PER_TICK = "6"
+CRAWL_AI_PER_TICK = "2"
 
 [[d1_databases]]
 binding = "DB"
@@ -18,5 +23,6 @@ database_id = "00000000-0000-0000-0000-000000000000"
 migrations_dir = "migrations"
 
 [triggers]
-# 01:00 UTC = 06:30 IST, so the feed is fresh before 7:00 am IST.
-crons = ["0 1 * * *"]
+# Website checks every 2 minutes from 23:30 to 06:30 IST (18:00-00:58 UTC); the cron string must match CRAWL_CRON in src/index.tsx.
+# Daily job at 01:00 UTC = 06:30 IST, so the feed is fresh before 7:00 am IST.
+crons = ["*/2 18-23,0 * * *", "0 1 * * *"]

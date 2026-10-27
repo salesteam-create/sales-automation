@@ -6,15 +6,16 @@ import { LEAD_STATUSES, STATUSES, isLeadStatus, isStatus, type LeadStatus, type 
 export interface AiEnv {
   GEMINI_API_KEY?: string;
   GEMINI_MODEL: string;
+  GEMINI_BASE_URL?: string; // only for local testing against a mock
 }
 
 export class AiUnavailableError extends Error {}
 
 const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
 
-async function generateJson<T>(env: AiEnv, prompt: string, schema: object): Promise<T> {
+export async function generateJson<T>(env: AiEnv, prompt: string, schema: object): Promise<T> {
   if (!env.GEMINI_API_KEY) throw new AiUnavailableError('AI is not set up yet (GEMINI_API_KEY missing).');
-  const res = await fetch(`${ENDPOINT}/${env.GEMINI_MODEL}:generateContent`, {
+  const res = await fetch(`${env.GEMINI_BASE_URL || ENDPOINT}/${env.GEMINI_MODEL}:generateContent`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY },
     body: JSON.stringify({
@@ -33,7 +34,7 @@ async function generateJson<T>(env: AiEnv, prompt: string, schema: object): Prom
   }
 }
 
-const KILOWOTT_CONTEXT = `Kilowott is a digital agency (India and Europe) that partners with other agencies as a
+export const KILOWOTT_CONTEXT = `Kilowott is a digital agency (India and Europe) that partners with other agencies as a
 white-label delivery partner (Integration model) or collaborator (Collaboration model).
 Services: Consulting & Strategy; Software & Applications (.NET, Node.js, PHP/Laravel, React, React Native, Vue, AWS/Azure, QA);
 Web & Ecommerce (WordPress, Shopify, WooCommerce, Webflow, Wix, NopCommerce, Klaviyo/HubSpot automation, payments, analytics);
@@ -143,6 +144,7 @@ export async function suggestNextSteps(
     unanswered: number;
     deal: string | null;
     history: string;
+    intel?: string;
   },
 ): Promise<string[]> {
   const prompt = `${KILOWOTT_CONTEXT}
@@ -155,8 +157,12 @@ Personal details have been replaced with placeholders like [Contact].
 History (newest first):
 ${input.history || '(none)'}
 
+From their website:
+${input.intel || '(not scanned yet)'}
+
 Give 1 to 3 concrete next actions for the salesperson, most important first. Each is one sentence that says what to do and
-why, and names the Kilowott service or offer to lead with when relevant. No generic advice.`;
+why, and names the Kilowott service or offer to lead with when relevant. Use recent website news as a reason to reach out
+when it fits. No generic advice.`;
 
   const raw = await generateJson<{ steps?: unknown }>(env, prompt, NEXT_STEPS_SCHEMA);
   const steps = Array.isArray(raw.steps) ? raw.steps.filter((s): s is string => typeof s === 'string' && !!s.trim()) : [];

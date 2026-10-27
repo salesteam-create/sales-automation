@@ -28,6 +28,8 @@ export interface Agency {
   unanswered_count: number;
   next_steps: string | null;
   next_steps_updated_at: string | null;
+  pages_discovered_at: string | null;
+  intel_stale: number;
   created_at: string;
   updated_at: string;
 }
@@ -229,7 +231,7 @@ export async function createSuggestion(
   status: Status,
   lead: LeadStatus,
   reason: string,
-  source: 'ai_note' | 'no_reply',
+  source: 'ai_note' | 'no_reply' | 'web',
 ): Promise<void> {
   if (!isAllowedCombo(status, lead)) status = statusForLead(lead, status);
   if (status === agency.status && lead === agency.lead_status) return;

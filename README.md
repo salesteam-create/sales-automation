@@ -1,6 +1,6 @@
 # Agency Tracker
 
-Web app for tracking partner agencies: meeting history, automatic follow-ups, AI summaries and next steps, a dashboard and a daily feed. Requirements are in [docs/BRD.md](docs/BRD.md). This is Phase 1 (core tracker); website intelligence comes in Phase 2.
+Web app for tracking partner agencies: meeting history, automatic follow-ups, AI summaries and next steps, a dashboard, a daily feed, and website intelligence (service gaps, upsell potential, nightly change checks). Requirements are in [docs/BRD.md](docs/BRD.md).
 
 Runs free on Cloudflare (Workers + D1) with the Gemini API free tier.
 
@@ -40,3 +40,7 @@ npm run typecheck
 - `src/reports.ts`: dashboard, daily feed, and the daily job
 - `src/views/`: the screens
 - The daily job runs at 06:30 IST (`crons` in `wrangler.toml`) and refreshes AI next steps for up to `NEXT_STEPS_DAILY_LIMIT` agencies with something new or due
+- `src/web.ts`: fetching agency sites, finding key pages (any language), turning HTML into comparable text, spotting real changes
+- `src/intel.ts`: first scan, nightly checks, AI labelling of changes, service gaps and upsell, opportunity suggestions
+- Website checks run every 2 minutes overnight (23:30 to 06:30 IST) in small batches (`CRAWL_PAGES_PER_TICK`, `CRAWL_AI_PER_TICK`) to fit the Workers free plan. Background AI use is capped per day by `AI_DAILY_BUDGET`
+- The first scan of ~210 sites takes 1 to 2 nights, depending on the AI budget. The first check of each page is a baseline; changes show from the next night on
