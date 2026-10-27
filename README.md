@@ -19,6 +19,14 @@ npm run deploy                             # prints the app's URL
 
 Then open the URL, go to **Import**, and upload Chabert's tab (Google Sheets: File > Download > Comma-separated values). The import report lists rows to check.
 
+Without access to the app, the same import can be run from the command line (it replaces all data):
+
+```bash
+npx esbuild scripts/import-to-sql.ts --bundle --platform=node --format=esm --outfile=/tmp/import-to-sql.mjs
+node /tmp/import-to-sql.mjs chabert.csv import.sql
+npx wrangler d1 execute agency-tracker --remote --file=import.sql
+```
+
 Access is open: anyone with the URL can view and edit. Do not share the URL outside the team.
 
 ## Local development

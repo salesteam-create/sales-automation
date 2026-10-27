@@ -116,3 +116,17 @@ describe('buildImportPlan', () => {
     expect(() => buildImportPlan('Name,Comment\nx,y', { today: TODAY })).toThrow(/Agency, Status and Lead Status/);
   });
 });
+
+describe('duplicates by website', () => {
+  it('merges rows with different names but the same website', () => {
+    const csv = [
+      HEADER,
+      'LD Media - Webdesign Agentur,16/10/2025,Austria,A,ok,Potential (Warm),Future fit Lead,,,,,https://ld-media.example',
+      'LD Media,17/10/2025,Austria,A,ok again,Potential (Warm),Warm Lead,,,,,https://www.ld-media.example/',
+    ].join('\n');
+    const plan = buildImportPlan(csv, { today: TODAY });
+    expect(plan.agencies).toHaveLength(1);
+    expect(plan.agencies[0].lead_status).toBe('Warm');
+    expect(plan.issues.find((i) => i.kind === 'duplicate')?.detail).toMatch(/same name or website/);
+  });
+});

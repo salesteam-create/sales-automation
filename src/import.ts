@@ -237,6 +237,8 @@ export function buildImportPlan(csv: string, opts: PlanOptions): ImportPlan {
   const cell = (row: string[], i: number) => (i >= 0 ? (row[i] ?? '').trim() : '');
 
   const byKey = new Map<string, ImportedAgency & { latestRowDate: string | null }>();
+  // The same website under a slightly different name ("LD Media" vs "LD Media - Agentur") is the same agency.
+  const keyByHost = new Map<string, string>();
   const issues: ImportIssue[] = [];
 
   rows.slice(1).forEach((row, i) => {
@@ -292,13 +294,15 @@ export function buildImportPlan(csv: string, opts: PlanOptions): ImportPlan {
     const framework = fw === 'sent' ? 'Sent' : fw === 'to send' ? 'To send' : fw === 'not needed' ? 'Not needed' : null;
     const contact = cell(row, cols.name).replace(/\s+/g, ' ');
 
-    const existing = byKey.get(key);
+    const host = website ? websiteHost(website) : null;
+    const hostKey = host ? keyByHost.get(host) : undefined;
+    const existing = byKey.get(key) ?? (hostKey ? byKey.get(hostKey) : undefined);
     if (existing) {
       issues.push({
-        agency_key: key,
+        agency_key: existing.key,
         row_number: rowNumber,
         kind: 'duplicate',
-        detail: `"${name}" also appears in row ${existing.rows[0]}. Merged into one record; check country and status.`,
+        detail: `"${name}" looks like "${existing.name}" in row ${existing.rows[0]} (same name or website). Merged into one record; check country and status.`,
       });
       existing.rows.push(rowNumber);
       existing.entries.push(...entries);
@@ -316,6 +320,7 @@ export function buildImportPlan(csv: string, opts: PlanOptions): ImportPlan {
       return;
     }
 
+    if (host) keyByHost.set(host, key);
     byKey.set(key, {
       key,
       name,
@@ -341,6 +346,14 @@ export function buildImportPlan(csv: string, opts: PlanOptions): ImportPlan {
   }
   scheduleImportFollowups(agencies, today, opts.catchUpPerDay ?? 10);
   return { agencies, issues };
+}
+
+function websiteHost(url: string): string | null {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '').toLowerCase();
+  } catch {
+    return null;
+  }
 }
 
 function isWeekend(day: string): boolean {
