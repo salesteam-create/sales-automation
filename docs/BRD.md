@@ -46,7 +46,7 @@ Two fields. **Lead Status** sets the follow-up timing. **Status** drives the das
 | Hot, Warm | +7 days, +15 days, +30 days, then monthly |
 | Future fit, Education | Every 30 days |
 | Cold | Every 90 days (light check; the sequence tool handles emails) |
-| Won | Monthly account check-in |
+| Won | None. Won agencies are active partners and do not appear in the daily feed |
 | Disqualified | None. The website is still monitored and a big change can prompt a "worth reopening?" suggestion |
 
 **Rules**
@@ -143,7 +143,7 @@ Date filter (this week, month, quarter, all time) on blocks 1 to 3, by meeting d
 1. Overdue follow-ups
 2. Due today
 3. AI suggestions waiting for a decision
-4. Website updates overnight, opportunities first
+4. Website updates from the last 3 days, opportunities first, only for agencies still being worked (Email Sequence, Opportunity, Potential (Warm), or a Warm lead). Won and Not Interested agencies are left out
 5. Yesterday's recap: notes logged and status changes
 
 Every item links to the agency and has quick actions. On a quiet day: "Nothing new today."

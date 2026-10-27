@@ -49,7 +49,8 @@ export function statusForLead(lead: LeadStatus, current: Status): Status {
 
 // Days until the next follow-up. `step` counts follow-ups done since the last real conversation.
 export function followupInterval(lead: LeadStatus, status: Status, step: number): number | null {
-  if (status === 'Won') return 30;
+  // Won agencies are active partners: no follow-up reminders.
+  if (status === 'Won') return null;
   switch (lead) {
     case 'Hot':
     case 'Warm':

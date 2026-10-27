@@ -21,11 +21,11 @@ describe('follow-up timing', () => {
     expect([0, 1, 2, 3, 7].map((s) => followupInterval('Warm', 'Potential (Warm)', s))).toEqual([7, 15, 30, 30, 30]);
   });
 
-  it('uses 30 days for Future fit and Education, 90 for Cold, monthly for Won, none for Disqualified', () => {
+  it('uses 30 days for Future fit and Education, 90 for Cold, none for Won or Disqualified', () => {
     expect(followupInterval('Future fit', 'Potential (Warm)', 0)).toBe(30);
     expect(followupInterval('Education', 'Opportunity', 4)).toBe(30);
     expect(followupInterval('Cold', 'Email Sequence', 0)).toBe(90);
-    expect(followupInterval('Hot', 'Won', 0)).toBe(30);
+    expect(followupInterval('Hot', 'Won', 0)).toBeNull();
     expect(nextFollowupDate('2026-10-27', 'Disqualified', 'Not Interested', 0)).toBeNull();
   });
 

@@ -303,13 +303,21 @@ export const FeedPage: FC<Base & { feed: Feed; tab: FeedTab }> = ({ feed, tab, t
             </div>
           </div>
           {feed.webUpdates.length === 0 ? (
-            <Empty title="No changes in the last day" body="Agency websites are checked overnight. The first check of a page sets a baseline." />
+            <Empty
+              title="No website news in the last three days"
+              body="New services, case studies and hiring from agencies you are working. Websites are checked overnight, and the first check of a page sets a baseline."
+            />
           ) : (
-            <ul class="queue queue--wrap">
-              {feed.webUpdates.slice(0, 5).map((c) => (
-                <ChangeRow c={c} today={today} showAgency />
-              ))}
-            </ul>
+            <>
+              <p class="meta" style="margin:0 0 4px;padding:0 var(--space-4)">
+                New services, case studies and hiring from agencies you are working, over the last three days.
+              </p>
+              <ul class="queue queue--wrap">
+                {feed.webUpdates.slice(0, 5).map((c) => (
+                  <ChangeRow c={c} today={today} showAgency />
+                ))}
+              </ul>
+            </>
           )}
         </section>
       </div>
@@ -422,7 +430,7 @@ export const DashboardPage: FC<Base & { d: Dashboard; range: Range; currency: st
           </span>
           <span class="v">{d.webUpdates.length}</span>
           <span class="k">Website updates</span>
-          <span class="d">{d.webUpdates.filter((c) => c.is_opportunity).length} opportunities</span>
+          <span class="d">Agencies you are working, last 24 hours</span>
         </a>
       </div>
 
