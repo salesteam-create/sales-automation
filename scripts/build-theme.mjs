@@ -28,6 +28,15 @@ for (const theme of themes.slice(1)) {
   for (const tk of perTheme) css += `  --${tk.name}: ${valueFor(tk.value, theme)};\n`;
   css += '}\n';
 }
+// Themes also follow the operating system preference, which is how the app is
+// actually used: nobody sets data-theme by hand. The :not() guard keeps an
+// explicit data-theme="light" winning over a dark system preference.
+for (const theme of themes.slice(1)) {
+  css += `@media (prefers-color-scheme: ${theme}) {\n  :root:not([data-theme="${themes[0]}"]) {\n`;
+  for (const tk of perTheme) css += `    --${tk.name}: ${valueFor(tk.value, theme)};\n`;
+  css += '  }\n}\n';
+}
+
 css += ':root {\n';
 for (const family of ['spacing', 'radius']) for (const tk of t[family]?.tokens ?? []) css += `  --${tk.name}: ${tk.value};\n`;
 for (const [key, stack] of Object.entries(t.type.families)) css += `  --font-${key}: ${stack};\n`;

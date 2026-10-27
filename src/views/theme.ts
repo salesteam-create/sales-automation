@@ -2,7 +2,7 @@
 // (design-system/). Do not edit by hand: run `npm run build:theme`.
 // Served at /app.css so it is cached once rather than inlined on every page.
 
-export const CSS_VERSION = '30c6ce950e';
+export const CSS_VERSION = 'ff36cc15af';
 
 export const CSS = String.raw`
 /* Generated from the Agency Tracker design system: tokens.json + components/bundle.css. */
@@ -78,6 +78,44 @@ export const CSS = String.raw`
   --shadow-card: 0 1px 2px rgba(0,0,0,0.5);
   --shadow-shell: 0 8px 24px rgba(0,0,0,0.55);
   --shadow-overlay: 0 10px 32px rgba(0,0,0,0.7);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --canvas: #0d1013;
+    --surface: #161a1f;
+    --surface-raised: #1c2127;
+    --surface-muted: #1b2026;
+    --border: #272d35;
+    --border-strong: #39414b;
+    --ink: #e8ebe9;
+    --ink-muted: #99a3a0;
+    --brand: #3fae7a;
+    --brand-hover: #58c08e;
+    --brand-soft: #11291f;
+    --brand-ink: #6fd2a2;
+    --on-brand: #0c1210;
+    --focus: #6fd2a2;
+    --danger: #f2857b;
+    --danger-soft: #3a1b19;
+    --warning: #e9b04a;
+    --warning-soft: #332810;
+    --info: #7aa9ef;
+    --info-soft: #16203a;
+    --neutral-soft: #232a31;
+    --avatar-bg: #2e3a35;
+    --avatar-ink: #e8ebe9;
+    --stage-won: #9ae3c0;
+    --stage-opportunity: #6cc89e;
+    --stage-potential: #46a87d;
+    --stage-sequence: #2a855f;
+    --stage-out: #1a6346;
+    --chart-bar: #46a87d;
+    --chart-grid: #242b32;
+    --chart-axis: #3a424a;
+    --shadow-card: 0 1px 2px rgba(0,0,0,0.5);
+    --shadow-shell: 0 8px 24px rgba(0,0,0,0.55);
+    --shadow-overlay: 0 10px 32px rgba(0,0,0,0.7);
+  }
 }
 :root {
   --space-1: 4px;

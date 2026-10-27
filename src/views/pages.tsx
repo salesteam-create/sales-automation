@@ -25,10 +25,15 @@ interface Base {
   error?: string | null;
 }
 
-const label = (type: string) => {
-  const t = type.replace('_', ' ');
-  return t.charAt(0).toUpperCase() + t.slice(1);
+const TYPE_LABELS: Record<string, string> = {
+  followup: 'Follow-up',
+  status_change: 'Status change',
+  meeting: 'Meeting',
+  call: 'Call',
+  email: 'Email',
+  note: 'Note',
 };
+const label = (type: string) => TYPE_LABELS[type] ?? type.charAt(0).toUpperCase() + type.slice(1).replace('_', ' ');
 const money = (currency: string, n: number) => `${currency} ${n.toLocaleString('en-GB')}`;
 const short = (currency: string, n: number) => (n >= 10_000 ? `${currency} ${Math.round(n / 1000)}k` : money(currency, n));
 const domain = (url: string | null) => (url ? url.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '') : '');
