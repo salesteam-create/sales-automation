@@ -1,0 +1,22 @@
+name = "agency-tracker"
+main = "src/index.tsx"
+compatibility_date = "2026-10-01"
+
+[vars]
+# Gemini model used for all AI features. Change here if Google renames free-tier models.
+GEMINI_MODEL = "gemini-2.5-flash"
+# Currency label for deal values on the dashboard.
+CURRENCY = "EUR"
+# Max agencies whose AI next steps are refreshed per daily run (keeps within free-tier limits).
+NEXT_STEPS_DAILY_LIMIT = "20"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "agency-tracker"
+# Replace with the id printed by `npx wrangler d1 create agency-tracker`.
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[triggers]
+# 01:00 UTC = 06:30 IST, so the feed is fresh before 7:00 am IST.
+crons = ["0 1 * * *"]
