@@ -18,8 +18,7 @@ CRAWL_AI_PER_TICK = "2"
 [[d1_databases]]
 binding = "DB"
 database_name = "agency-tracker"
-# Replace with the id printed by `npx wrangler d1 create agency-tracker`.
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "02e51ebe-a49c-4a77-96a5-0a6666f79194"
 migrations_dir = "migrations"
 
 [triggers]
