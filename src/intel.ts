@@ -116,15 +116,21 @@ export async function getChanges(db: D1Database, agencyId: number, limit = 30): 
   ).results;
 }
 
-// Labelled, non-trivial changes from the last 24 hours, opportunities first.
-export async function recentChanges(db: D1Database): Promise<WebChange[]> {
+// Agencies whose website news goes in the feed: anyone still being worked
+// (Email Sequence, Opportunity, Potential (Warm), or a Warm lead). Won and Not Interested are left out.
+export const FEED_AGENCIES_SQL = `(a.status IN ('Email Sequence', 'Opportunity', 'Potential (Warm)') OR a.lead_status = 'Warm')`;
+
+// Labelled, non-trivial changes (new services, case studies, hiring, etc.), opportunities first.
+// Three days by default so news from the weekend is still there on Monday.
+export async function recentChanges(db: D1Database, hours = 72): Promise<WebChange[]> {
   return (
     await db
       .prepare(
         `SELECT c.*, a.name AS agency_name FROM web_changes c JOIN agencies a ON a.id = c.agency_id
-         WHERE c.detected_at >= datetime('now', '-24 hours') AND c.label IS NOT NULL AND c.label != 'other'
+         WHERE c.detected_at >= datetime('now', ?) AND c.label IS NOT NULL AND c.label != 'other' AND ${FEED_AGENCIES_SQL}
          ORDER BY c.is_opportunity DESC, c.detected_at DESC`,
       )
+      .bind(`-${hours} hours`)
       .all<WebChange>()
   ).results;
 }

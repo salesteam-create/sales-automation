@@ -165,6 +165,7 @@ export const FeedPage: FC<{ feed: Feed; today: string; msg?: string | null }> = 
       {feed.webUpdates.length > 0 && (
         <section class="card">
           <h2>Website updates ({feed.webUpdates.length})</h2>
+          <p class="small muted">New services, case studies, hiring and other news from agencies you are working (last 3 days).</p>
           <Collapsible items={feed.webUpdates} limit={10} render={(c) => <ChangeItem c={c} showAgency />} />
         </section>
       )}
@@ -303,7 +304,8 @@ export const DashboardPage: FC<{ d: Dashboard; range: Range; today: string; curr
       <section class="card">
         <h2>5. Today's web updates ({d.webUpdates.length})</h2>
         <p class="muted small">
-          Changes found on agency websites in the last 24 hours. {d.webUpdates.filter((c) => c.is_opportunity).length} flagged as opportunities.
+          News from agencies you are working (not Won or Not Interested), last 24 hours.{' '}
+          {d.webUpdates.filter((c) => c.is_opportunity).length} flagged as opportunities.
         </p>
         {d.webUpdates.length === 0 && <p class="muted">No website updates in the last 24 hours.</p>}
         <Collapsible items={d.webUpdates} limit={6} render={(c) => <ChangeItem c={c} showAgency />} />

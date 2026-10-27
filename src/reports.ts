@@ -53,10 +53,10 @@ export async function loadDashboard(db: D1Database, range: Range, today: string)
       )
       .bind(...rangeBinds)
       .all<Agency>(),
-    db.prepare(`SELECT * FROM agencies WHERE next_followup_date < ? ORDER BY next_followup_date, name`).bind(today).all<Agency>(),
-    db.prepare(`SELECT * FROM agencies WHERE next_followup_date = ? ORDER BY name`).bind(today).all<Agency>(),
+    db.prepare(`SELECT * FROM agencies WHERE next_followup_date < ? AND status != 'Won' ORDER BY next_followup_date, name`).bind(today).all<Agency>(),
+    db.prepare(`SELECT * FROM agencies WHERE next_followup_date = ? AND status != 'Won' ORDER BY name`).bind(today).all<Agency>(),
     pendingSuggestions(db),
-    recentChanges(db),
+    recentChanges(db, 24),
   ]);
 
   const counts = new Map(statusRows.results.map((r) => [r.status, r.n]));
@@ -100,8 +100,8 @@ function istDayToUtcRange(day: string): [string, string] {
 export async function loadFeed(db: D1Database, today: string): Promise<Feed> {
   const [from, to] = istDayToUtcRange(addDays(today, -1));
   const [overdue, dueToday, suggestions, webUpdates, yesterday] = await Promise.all([
-    db.prepare(`SELECT * FROM agencies WHERE next_followup_date < ? ORDER BY next_followup_date, name`).bind(today).all<Agency>(),
-    db.prepare(`SELECT * FROM agencies WHERE next_followup_date = ? ORDER BY name`).bind(today).all<Agency>(),
+    db.prepare(`SELECT * FROM agencies WHERE next_followup_date < ? AND status != 'Won' ORDER BY next_followup_date, name`).bind(today).all<Agency>(),
+    db.prepare(`SELECT * FROM agencies WHERE next_followup_date = ? AND status != 'Won' ORDER BY name`).bind(today).all<Agency>(),
     pendingSuggestions(db),
     recentChanges(db),
     db
