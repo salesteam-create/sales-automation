@@ -13,16 +13,45 @@ export class AiUnavailableError extends Error {}
 
 const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
 
+// Newer Flash models think before answering, which can be slow enough to time out. Ask for a short think;
+// if the model rejects the setting, fall back to its default. Timeouts and server errors are retried once.
+const THINKING = { thinkingConfig: { thinkingLevel: 'low' } };
+const TIMEOUT_MS = 45_000;
+
+async function callGemini(env: AiEnv, prompt: string, schema: object, thinking: boolean): Promise<Response | 'timeout'> {
+  try {
+    return await fetch(`${env.GEMINI_BASE_URL || ENDPOINT}/${env.GEMINI_MODEL}:generateContent`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY ?? '' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: { responseMimeType: 'application/json', responseSchema: schema, temperature: 0.3, ...(thinking ? THINKING : {}) },
+      }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch (err) {
+    if ((err as Error).name === 'TimeoutError') return 'timeout';
+    throw new AiUnavailableError(`AI request failed: ${(err as Error).message}`);
+  }
+}
+
 export async function generateJson<T>(env: AiEnv, prompt: string, schema: object): Promise<T> {
   if (!env.GEMINI_API_KEY) throw new AiUnavailableError('AI is not set up yet (GEMINI_API_KEY missing).');
-  const res = await fetch(`${env.GEMINI_BASE_URL || ENDPOINT}/${env.GEMINI_MODEL}:generateContent`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY },
-    body: JSON.stringify({
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: { responseMimeType: 'application/json', responseSchema: schema, temperature: 0.3 },
-    }),
-  });
+  let thinking = true;
+  let res: Response | 'timeout' = 'timeout';
+  for (let attempt = 0; attempt < 3; attempt++) {
+    res = await callGemini(env, prompt, schema, thinking);
+    if (res !== 'timeout' && res.status === 400 && thinking) {
+      const msg = await googleError(res.clone());
+      if (/think/i.test(msg)) {
+        thinking = false; // this model does not take the thinking setting
+        continue;
+      }
+    }
+    const retryable = res === 'timeout' || res.status >= 500;
+    if (!retryable || attempt === 1) break;
+  }
+  if (res === 'timeout') throw new AiUnavailableError('The AI took too long to answer. Try again in a minute.');
   if (res.status === 429) throw new AiUnavailableError('AI free-tier limit reached. Try again later.');
   if (res.status === 404) {
     const models = await availableFlashModels(env);
@@ -31,9 +60,11 @@ export async function generateJson<T>(env: AiEnv, prompt: string, schema: object
         (models.length ? ` Set GEMINI_MODEL in Cloudflare to one of: ${models.join(', ')}.` : ''),
     );
   }
+  if (res.status >= 500) throw new AiUnavailableError(`Google's AI service is busy or slow right now (${res.status}). Try again in a minute.`);
   if (!res.ok) throw new AiUnavailableError(`AI request failed (${res.status}): ${await googleError(res)}`);
-  const data = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
-  const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
+  const data = (await res.json()) as { candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] } }[] };
+  // Skip any thought summaries; only the answer parts hold the JSON.
+  const text = data.candidates?.[0]?.content?.parts?.filter((p) => !p.thought).map((p) => p.text ?? '').join('') ?? '';
   try {
     return JSON.parse(text) as T;
   } catch {
