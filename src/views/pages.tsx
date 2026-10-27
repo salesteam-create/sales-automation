@@ -782,7 +782,7 @@ export const AgencyListPage: FC<
                       </td>
                       <td class="num">{a.unanswered_count}</td>
                       <td>
-                        <FollowupActions agencyId={a.id} hasFollowup={!!a.next_followup_date} back={back} today={today} />
+                        <FollowupMenu agencyId={a.id} hasFollowup={!!a.next_followup_date} back={back} today={today} />
                       </td>
                     </tr>
                   ))}
@@ -1012,11 +1012,13 @@ export const AgencyPage: FC<
               )}
               {a.country && <span>{a.country}</span>}
             </p>
+            <p class="chip-row" style="margin:8px 0 0">
+              <StageBadge status={a.status} />
+              <TempBadge lead={a.lead_status} />
+            </p>
           </div>
         </div>
         <div class="acts">
-          <StageBadge status={a.status} />
-          <TempBadge lead={a.lead_status} />
           <a class="btn" href={`/agencies/${a.id}/edit`}>
             <Icon name="edit" />
             Edit

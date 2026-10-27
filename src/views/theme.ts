@@ -2,7 +2,7 @@
 // (design-system/). Do not edit by hand: run `npm run build:theme`.
 // Served at /app.css so it is cached once rather than inlined on every page.
 
-export const CSS_VERSION = 'ff36cc15af';
+export const CSS_VERSION = '1cc631f1c1';
 
 export const CSS = String.raw`
 /* Generated from the Agency Tracker design system: tokens.json + components/bundle.css. */
@@ -223,7 +223,7 @@ svg.i.lg { width: 20px; height: 20px; }
 .page-hd { display: flex; align-items: flex-start; gap: var(--space-4); }
 .page-hd h1 { margin: 0; font-size: 24px; line-height: 30px; font-weight: 650; letter-spacing: -0.02em; }
 .page-hd .sub { margin: 2px 0 0; font-size: 14px; line-height: 20px; color: var(--ink-muted); }
-.page-hd .acts { margin-left: auto; display: flex; gap: var(--space-2); flex: none; align-items: center; }
+.page-hd .acts { margin-left: auto; display: flex; flex-wrap: wrap; gap: var(--space-2); flex: 0 1 auto; align-items: center; justify-content: flex-end; }
 
 /* ================= buttons ================= */
 
@@ -536,13 +536,16 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--brand); 
   .rowcard .pills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
   .rowcard .dates { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
   .rowcard .dates .k { display: block; font-size: 11px; line-height: 15px; color: var(--ink-muted); }
-  .rowcard .row-acts { display: flex; gap: var(--space-2); margin-top: 10px; }
-  .rowcard .row-acts > form { flex: 1 1 0; display: flex; }
-  .rowcard .row-acts .btn { flex: 1 1 0; height: 40px; }
+  .rowcard .row-acts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); margin-top: 10px; }
+  .rowcard .row-acts > form { display: flex; }
+  .rowcard .row-acts > form:first-child { grid-column: 1 / -1; }
+  .rowcard .row-acts .btn { width: 100%; height: 40px; }
 
   .queue > li { flex-wrap: wrap; }
-  .queue .actions { width: 100%; }
-  .queue .actions > form { flex: 1 1 auto; }
+  .queue .actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)) auto; gap: var(--space-2); width: 100%; }
+  .queue .actions > form { display: flex; }
+  .queue .actions > form:first-child { grid-column: 1 / 3; }
+  .queue .actions > details { grid-column: 3; grid-row: 1; }
   .queue .actions .btn { width: 100%; height: 40px; }
 
   .hbar { grid-template-columns: 104px minmax(0, 1fr) 34px; }
@@ -632,7 +635,10 @@ details.menu > summary { color: inherit; }
   .page-hd .acts .btn { flex: 1 1 140px; }
   .split { grid-template-columns: minmax(0, 1fr); }
   .due-strip .actions { margin-left: 0; width: 100%; }
-  .due-strip .actions > form { flex: 1 1 auto; }
+  .due-strip .actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)) auto; gap: var(--space-2); width: 100%; }
+  .due-strip .actions > form { display: flex; }
+  .due-strip .actions > form:first-child { grid-column: 1 / 3; }
+  .due-strip .actions > details { grid-column: 3; grid-row: 1; }
   .due-strip .actions .btn { width: 100%; height: 40px; }
   .toolbar .right { margin-left: 0; width: 100%; }
   .kv dd { text-align: left; }

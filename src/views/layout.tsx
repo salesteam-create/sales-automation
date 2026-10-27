@@ -194,6 +194,8 @@ const Hidden: FC<{ back: string; action: string }> = ({ back, action }) => (
   </>
 );
 
+// Three visible buttons, as asked for: Done, Snooze 3 days, Snooze 1 week.
+// Done is filled so the common case still reads first.
 export const FollowupButtons: FC<{ agencyId: number; back: string; wide?: boolean }> = ({ agencyId, back, wide }) => (
   <>
     <form method="post" action={`/agencies/${agencyId}/followup`} style={wide ? 'flex:1 1 0' : undefined}>
@@ -205,10 +207,11 @@ export const FollowupButtons: FC<{ agencyId: number; back: string; wide?: boolea
     </form>
     <form method="post" action={`/agencies/${agencyId}/followup`} style={wide ? 'flex:1 1 0' : undefined}>
       <Hidden back={back} action="snooze3" />
-      <button class={wide ? 'btn' : 'btn btn--sm'}>
-        <Icon name="clock" />
-        Snooze
-      </button>
+      <button class={wide ? 'btn' : 'btn btn--sm'}>Snooze 3 days</button>
+    </form>
+    <form method="post" action={`/agencies/${agencyId}/followup`} style={wide ? 'flex:1 1 0' : undefined}>
+      <Hidden back={back} action="snooze7" />
+      <button class={wide ? 'btn' : 'btn btn--sm'}>Snooze 1 week</button>
     </form>
   </>
 );
@@ -221,6 +224,13 @@ export const FollowupMenu: FC<{ agencyId: number; hasFollowup: boolean; back: st
     <div class="menu-list">
       {hasFollowup && (
         <>
+          <form method="post" action={`/agencies/${agencyId}/followup`}>
+            <Hidden back={back} action="done" />
+            <button>
+              <Icon name="check" />
+              Done
+            </button>
+          </form>
           <form method="post" action={`/agencies/${agencyId}/followup`}>
             <Hidden back={back} action="snooze3" />
             <button>
