@@ -3,8 +3,8 @@ main = "src/index.tsx"
 compatibility_date = "2026-10-01"
 
 [vars]
-# Gemini model used for all AI features. Change here if Google renames free-tier models.
-GEMINI_MODEL = "gemini-2.5-flash"
+# Gemini model used for all AI features. "gemini-flash-latest" follows Google's current Flash model, so it does not break when versions retire.
+GEMINI_MODEL = "gemini-flash-latest"
 # Currency label for deal values on the dashboard.
 CURRENCY = "EUR"
 # Max agencies whose AI next steps are refreshed per daily run (keeps within free-tier limits).
