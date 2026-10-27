@@ -13,6 +13,7 @@ import {
   logConversation,
   markFollowupDone,
   pendingSuggestions,
+  recomputeLastContact,
   resolveSuggestion,
   setNextFollowup,
 } from './db';
@@ -26,6 +27,7 @@ import {
   AgencyListPage,
   AgencyPage,
   DashboardPage,
+  EditAgencyPage,
   FeedPage,
   ImportPage,
   ImportReportPage,
@@ -52,7 +54,8 @@ const orNull = (v: unknown) => str(v) || null;
 // Only allow redirects back into this app.
 function back(c: Context, fallback: string, value: unknown, msg?: string): Response {
   const target = str(value).startsWith('/') && !str(value).startsWith('//') ? str(value) : fallback;
-  const url = msg ? `${target}${target.includes('?') ? '&' : '?'}msg=${encodeURIComponent(msg)}` : target;
+  const [path, hash] = target.split('#');
+  const url = msg ? `${path}${path.includes('?') ? '&' : '?'}msg=${encodeURIComponent(msg)}${hash ? '#' + hash : ''}` : target;
   return c.redirect(url, 303);
 }
 
@@ -164,7 +167,7 @@ app.post('/agencies/:id/edit', async (c) => {
   )
     .bind(str(f.name) || agency.name, website, orNull(f.country), framework, orNull(f.deal_description), Number.isFinite(value) ? value : null, agency.id)
     .run();
-  return back(c, `/agencies/${agency.id}`, '', 'Details saved.');
+  return back(c, `/agencies/${agency.id}`, f.back, 'Details saved.');
 });
 
 app.post('/agencies/:id/contacts', async (c) => {
@@ -176,12 +179,88 @@ app.post('/agencies/:id/contacts', async (c) => {
       .bind(agency.id, str(f.name), orNull(f.role), orNull(f.email), orNull(f.linkedin))
       .run();
   }
-  return back(c, `/agencies/${agency.id}`, '', 'Contact added.');
+  return back(c, `/agencies/${agency.id}`, f.back, 'Contact added.');
 });
 
 app.post('/contacts/:cid/delete', async (c) => {
   const row = await c.env.DB.prepare('DELETE FROM contacts WHERE id = ? RETURNING agency_id').bind(Number(c.req.param('cid'))).first<{ agency_id: number }>();
-  return back(c, row ? `/agencies/${row.agency_id}` : '/agencies', '', 'Contact removed.');
+  return back(c, row ? `/agencies/${row.agency_id}/edit` : '/agencies', '', 'Contact removed.');
+});
+
+app.post('/contacts/:cid', async (c) => {
+  const f = await c.req.parseBody();
+  if (!str(f.name)) return back(c, '/agencies', '');
+  const row = await c.env.DB.prepare('UPDATE contacts SET name = ?, role = ?, email = ?, linkedin = ? WHERE id = ? RETURNING agency_id')
+    .bind(str(f.name), orNull(f.role), orNull(f.email), orNull(f.linkedin), Number(c.req.param('cid')))
+    .first<{ agency_id: number }>();
+  return back(c, row ? `/agencies/${row.agency_id}/edit` : '/agencies', '', 'Contact saved.');
+});
+
+// ---------- full edit page ----------
+
+app.get('/agencies/:id/edit', async (c) => {
+  const agency = await loadAgencyOr404(c);
+  if (!agency) return c.notFound();
+  const [contacts, timeline] = await Promise.all([getContacts(c.env.DB, agency.id), getTimeline(c.env.DB, agency.id)]);
+  return c.html(
+    <EditAgencyPage agency={agency} contacts={contacts} timeline={timeline} currency={c.env.CURRENCY} msg={c.req.query('msg')} error={c.req.query('error')} />,
+  );
+});
+
+app.post('/agencies/:id/edit-status', async (c) => {
+  const agency = await loadAgencyOr404(c);
+  if (!agency) return c.notFound();
+  const f = await c.req.parseBody();
+  const editUrl = `/agencies/${agency.id}/edit`;
+  if (!isStatus(f.status) || !isLeadStatus(f.lead_status) || !isAllowedCombo(f.status, f.lead_status)) {
+    return c.redirect(`${editUrl}?error=${encodeURIComponent('That Status / Lead Status combination is not allowed.')}`, 303);
+  }
+  const today = todayIST();
+  await changeStatus(c.env.DB, agency, f.status, f.lead_status, orNull(f.reason), today);
+  // Dates typed here override whatever the status change worked out.
+  const last = isValidDay(str(f.last_contact_date)) ? str(f.last_contact_date) : null;
+  const next = isValidDay(str(f.next_followup_date)) ? str(f.next_followup_date) : null;
+  const fresh = (await getAgency(c.env.DB, agency.id))!;
+  const nextChanged = next !== agency.next_followup_date;
+  await c.env.DB.prepare(`UPDATE agencies SET last_contact_date = ?, next_followup_date = ?, updated_at = datetime('now') WHERE id = ?`)
+    .bind(last, nextChanged ? next : fresh.next_followup_date, agency.id)
+    .run();
+  return back(c, editUrl, '', 'Status and dates saved.');
+});
+
+app.post('/timeline/:tid', async (c) => {
+  const f = await c.req.parseBody();
+  const type = str(f.type) || 'note';
+  const row = await c.env.DB.prepare(
+    `UPDATE timeline SET date = ?, type = ?, summary = ?, raw_notes = ?, next_step = ? WHERE id = ? RETURNING agency_id`,
+  )
+    .bind(isValidDay(str(f.date)) ? str(f.date) : null, type, orNull(f.summary), orNull(f.raw_notes), orNull(f.next_step), Number(c.req.param('tid')))
+    .first<{ agency_id: number }>();
+  if (!row) return back(c, '/agencies', '');
+  await recomputeLastContact(c.env.DB, row.agency_id);
+  return back(c, `/agencies/${row.agency_id}/edit#timeline`, '', 'Entry saved.');
+});
+
+app.post('/timeline/:tid/delete', async (c) => {
+  const row = await c.env.DB.prepare('DELETE FROM timeline WHERE id = ? RETURNING agency_id').bind(Number(c.req.param('tid'))).first<{ agency_id: number }>();
+  if (!row) return back(c, '/agencies', '');
+  await recomputeLastContact(c.env.DB, row.agency_id);
+  return back(c, `/agencies/${row.agency_id}/edit`, '', 'Entry deleted.');
+});
+
+app.post('/agencies/:id/delete', async (c) => {
+  const agency = await loadAgencyOr404(c);
+  if (!agency) return c.notFound();
+  const f = await c.req.parseBody();
+  if (str(f.confirm) !== '1') return c.redirect(`/agencies/${agency.id}/edit`, 303);
+  const db = c.env.DB;
+  // Child rows are removed explicitly; D1 does not enforce ON DELETE CASCADE unless foreign keys are on.
+  await db.batch(
+    ['web_changes', 'agency_intel', 'watched_pages', 'import_issues', 'suggestions', 'timeline', 'contacts']
+      .map((t) => db.prepare(`DELETE FROM ${t} WHERE agency_id = ?`).bind(agency.id))
+      .concat(db.prepare('DELETE FROM agencies WHERE id = ?').bind(agency.id)),
+  );
+  return c.redirect(`/agencies?msg=${encodeURIComponent(`${agency.name} deleted.`)}`, 303);
 });
 
 app.post('/agencies/:id/status', async (c) => {

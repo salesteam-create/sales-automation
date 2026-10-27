@@ -541,9 +541,14 @@ export const AgencyPage: FC<{
             <Pill value={a.lead_status} />
           </div>
         </div>
-        <a class="btn primary" href={`/agencies/${a.id}/log`}>
-          Log meeting or note
-        </a>
+        <div class="row">
+          <a class="btn" href={`/agencies/${a.id}/edit`}>
+            Edit
+          </a>
+          <a class="btn primary" href={`/agencies/${a.id}/log`}>
+            Log meeting or note
+          </a>
+        </div>
       </div>
       <div style="height:12px" />
       <Notice msg={msg} ok />
@@ -632,64 +637,183 @@ export const AgencyPage: FC<{
         </section>
 
         <section class="card">
-          <h2>Details</h2>
-          <form method="post" action={`/agencies/${a.id}/edit`}>
-            <div class="fields">
-              <div>
-                <label>Agency name</label>
-                <input type="text" name="name" value={a.name} required />
-              </div>
-              <div>
-                <label>Website</label>
-                <input type="url" name="website" value={a.website ?? ''} />
-              </div>
-              <div>
-                <label>Country</label>
-                <input type="text" name="country" value={a.country ?? ''} />
-              </div>
-              <div>
-                <label>Framework magazine</label>
-                <select name="framework">
-                  <option value="">Not set</option>
-                  {FRAMEWORK_OPTIONS.map((f) => (
-                    <option selected={a.framework === f}>{f}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label>Deal in hand</label>
-                <input type="text" name="deal_description" value={a.deal_description ?? ''} />
-              </div>
-              <div>
-                <label>Estimated value ({currency})</label>
-                <input type="number" name="deal_value" step="any" min="0" value={a.deal_value ?? ''} />
-              </div>
+          <div class="row" style="justify-content:space-between">
+            <h2>Details</h2>
+            <a class="small" href={`/agencies/${a.id}/edit`}>
+              Edit
+            </a>
+          </div>
+          <div class="small">
+            <div>Framework magazine: {a.framework ?? 'Not set'}</div>
+            <div>
+              Deal in hand: {a.deal_description ?? 'None'}
+              {a.deal_value != null && (
+                <>
+                  {' '}
+                  ({currency} {a.deal_value.toLocaleString('en-GB')})
+                </>
+              )}
             </div>
-            <p>
-              <button>Save details</button>
-            </p>
-          </form>
+          </div>
+          <h3 style="margin-top:12px">Contacts</h3>
+          {contacts.length === 0 && <p class="small muted">No contacts yet.</p>}
+          {contacts.map((c) => (
+            <div class="item row small">
+              <b>{c.name}</b>
+              {c.role && <span class="muted">{c.role}</span>}
+              {c.email && <a href={`mailto:${c.email}`}>{c.email}</a>}
+              {c.linkedin && (
+                <a href={c.linkedin} target="_blank" rel="noopener">
+                  LinkedIn
+                </a>
+              )}
+            </div>
+          ))}
         </section>
       </div>
 
       <section class="card">
+        <div class="row" style="justify-content:space-between">
+          <h2>Timeline</h2>
+          {timeline.length > 0 && (
+            <a class="small" href={`/agencies/${a.id}/edit#timeline`}>
+              Edit entries
+            </a>
+          )}
+        </div>
+        {timeline.length === 0 && <p class="muted">Nothing logged yet.</p>}
+        {timeline.map((e) => (
+          <TimelineItem e={e} />
+        ))}
+      </section>
+      <script dangerouslySetInnerHTML={{ __html: comboScript }} />
+    </Layout>
+  );
+};
+
+// ---------- Edit agency ----------
+
+const ENTRY_TYPES = ['meeting', 'call', 'email', 'note', 'followup', 'status_change'] as const;
+
+export const EditAgencyPage: FC<{
+  agency: Agency;
+  contacts: Contact[];
+  timeline: TimelineEntry[];
+  currency: string;
+  msg?: string | null;
+  error?: string | null;
+}> = ({ agency: a, contacts, timeline, currency, msg, error }) => {
+  const back = `/agencies/${a.id}/edit`;
+  return (
+    <Layout title={`Edit: ${a.name}`} active="agencies">
+      <p class="small">
+        <a href={`/agencies/${a.id}`}>← Back to {a.name}</a>
+      </p>
+      <h1>Edit {a.name}</h1>
+      <div style="height:12px" />
+      <Notice msg={msg} ok />
+      <Notice msg={error} />
+
+      <section class="card">
+        <h2>Details</h2>
+        <form method="post" action={`/agencies/${a.id}/edit`}>
+          <input type="hidden" name="back" value={back} />
+          <div class="fields">
+            <div>
+              <label>Agency name *</label>
+              <input type="text" name="name" value={a.name} required />
+            </div>
+            <div>
+              <label>Website</label>
+              <input type="url" name="website" value={a.website ?? ''} placeholder="https://" />
+            </div>
+            <div>
+              <label>Country</label>
+              <input type="text" name="country" value={a.country ?? ''} />
+            </div>
+            <div>
+              <label>Framework magazine</label>
+              <select name="framework">
+                <option value="">Not set</option>
+                {FRAMEWORK_OPTIONS.map((f) => (
+                  <option selected={a.framework === f}>{f}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label>Deal in hand</label>
+              <input type="text" name="deal_description" value={a.deal_description ?? ''} />
+            </div>
+            <div>
+              <label>Estimated value ({currency})</label>
+              <input type="number" name="deal_value" step="any" min="0" value={a.deal_value ?? ''} />
+            </div>
+          </div>
+          <p class="small muted">Changing the website restarts the website scan for this agency.</p>
+          <p>
+            <button class="primary">Save details</button>
+          </p>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>Status and follow-up</h2>
+        <form method="post" action={`/agencies/${a.id}/edit-status`} data-combo>
+          <div class="fields">
+            <StatusFields status={a.status} lead={a.lead_status} />
+            <div>
+              <label>Last contact</label>
+              <input type="date" name="last_contact_date" value={a.last_contact_date ?? ''} />
+            </div>
+            <div>
+              <label>Next follow-up (empty = none)</label>
+              <input type="date" name="next_followup_date" value={a.next_followup_date ?? ''} />
+            </div>
+          </div>
+          <label>Reason for a status change (optional)</label>
+          <input type="text" name="reason" />
+          <p class="small muted">
+            A status change is logged in the timeline and normally sets a new follow-up date. A date you enter here wins.
+          </p>
+          <p>
+            <button class="primary">Save status and dates</button>
+          </p>
+        </form>
+      </section>
+
+      <section class="card">
         <h2>Contacts</h2>
         {contacts.map((c) => (
-          <div class="item row">
-            <b>{c.name}</b>
-            {c.role && <span class="muted">{c.role}</span>}
-            {c.email && <a href={`mailto:${c.email}`}>{c.email}</a>}
-            {c.linkedin && (
-              <a href={c.linkedin} target="_blank" rel="noopener">
-                LinkedIn
-              </a>
-            )}
-            <form class="inline" method="post" action={`/contacts/${c.id}/delete`}>
-              <button class="link small">Remove</button>
-            </form>
-          </div>
+          <form class="item" method="post" action={`/contacts/${c.id}`}>
+            <div class="fields">
+              <div>
+                <label>Name *</label>
+                <input type="text" name="name" value={c.name} required />
+              </div>
+              <div>
+                <label>Role</label>
+                <input type="text" name="role" value={c.role ?? ''} />
+              </div>
+              <div>
+                <label>Email</label>
+                <input type="email" name="email" value={c.email ?? ''} />
+              </div>
+              <div>
+                <label>LinkedIn</label>
+                <input type="url" name="linkedin" value={c.linkedin ?? ''} />
+              </div>
+            </div>
+            <div class="row" style="margin-top:8px">
+              <button>Save contact</button>
+              <button formaction={`/contacts/${c.id}/delete`} class="link small">
+                Remove
+              </button>
+            </div>
+          </form>
         ))}
-        <form method="post" action={`/agencies/${a.id}/contacts`}>
+        <form class="item" method="post" action={`/agencies/${a.id}/contacts`}>
+          <input type="hidden" name="back" value={back} />
+          <h3>Add a contact</h3>
           <div class="fields">
             <div>
               <label>Name *</label>
@@ -714,17 +838,68 @@ export const AgencyPage: FC<{
         </form>
       </section>
 
-      <section class="card">
-        <h2>Timeline</h2>
+      <section class="card" id="timeline">
+        <h2>Timeline entries ({timeline.length})</h2>
         {timeline.length === 0 && <p class="muted">Nothing logged yet.</p>}
         {timeline.map((e) => (
-          <TimelineItem e={e} />
+          <form class="item" method="post" action={`/timeline/${e.id}`}>
+            <div class="fields">
+              <div>
+                <label>Date</label>
+                <input type="date" name="date" value={e.date ?? ''} />
+              </div>
+              <div>
+                <label>Type</label>
+                <select name="type">
+                  {ENTRY_TYPES.map((t) => (
+                    <option value={t} selected={e.type === t}>
+                      {t.replace('_', ' ')}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label>Next step</label>
+                <input type="text" name="next_step" value={e.next_step ?? ''} />
+              </div>
+            </div>
+            <label>Summary</label>
+            <textarea name="summary" style="min-height:60px">
+              {e.summary ?? ''}
+            </textarea>
+            <label>Notes</label>
+            <textarea name="raw_notes" style="min-height:60px">
+              {e.raw_notes ?? ''}
+            </textarea>
+            <div class="row" style="margin-top:8px">
+              <button>Save entry</button>
+              <button formaction={`/timeline/${e.id}/delete`} class="link small" data-confirm="Delete this timeline entry?">
+                Delete entry
+              </button>
+            </div>
+          </form>
         ))}
       </section>
-      <script dangerouslySetInnerHTML={{ __html: comboScript }} />
+
+      <section class="card">
+        <h2>Delete agency</h2>
+        <p class="small muted">Removes the agency with its contacts, timeline, suggestions and website data. This cannot be undone.</p>
+        <form method="post" action={`/agencies/${a.id}/delete`}>
+          <label style="margin:0 0 8px">
+            <input type="checkbox" name="confirm" value="1" required /> Yes, delete {a.name} permanently
+          </label>
+          <button style="border-color:var(--red);color:var(--red)">Delete agency</button>
+        </form>
+      </section>
+      <script dangerouslySetInnerHTML={{ __html: comboScript + confirmScript }} />
     </Layout>
   );
 };
+
+// Asks before buttons marked data-confirm submit.
+const confirmScript = `
+document.querySelectorAll('[data-confirm]').forEach(function(b){b.addEventListener('click',function(e){
+if(!confirm(b.getAttribute('data-confirm')))e.preventDefault();});});`;
 
 // ---------- Intelligence ----------
 

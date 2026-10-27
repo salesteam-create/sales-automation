@@ -275,3 +275,15 @@ export async function saveNextSteps(db: D1Database, agencyId: number, steps: str
     .bind(JSON.stringify(steps), agencyId)
     .run();
 }
+
+// After a timeline entry is edited or deleted, last contact follows the latest real conversation.
+export async function recomputeLastContact(db: D1Database, agencyId: number): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE agencies SET last_contact_date = (
+         SELECT MAX(date) FROM timeline WHERE agency_id = ? AND type != 'status_change' AND date IS NOT NULL
+       ), updated_at = datetime('now') WHERE id = ?`,
+    )
+    .bind(agencyId, agencyId)
+    .run();
+}
