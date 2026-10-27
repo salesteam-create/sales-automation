@@ -24,13 +24,47 @@ export async function generateJson<T>(env: AiEnv, prompt: string, schema: object
     }),
   });
   if (res.status === 429) throw new AiUnavailableError('AI free-tier limit reached. Try again later.');
-  if (!res.ok) throw new AiUnavailableError(`AI request failed (${res.status}).`);
+  if (res.status === 404) {
+    const models = await availableFlashModels(env);
+    throw new AiUnavailableError(
+      `AI model "${env.GEMINI_MODEL}" is not available for this key.` +
+        (models.length ? ` Set GEMINI_MODEL in Cloudflare to one of: ${models.join(', ')}.` : ''),
+    );
+  }
+  if (!res.ok) throw new AiUnavailableError(`AI request failed (${res.status}): ${await googleError(res)}`);
   const data = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
   const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
   try {
     return JSON.parse(text) as T;
   } catch {
     throw new AiUnavailableError('AI returned an unreadable answer. Try again.');
+  }
+}
+
+async function googleError(res: Response): Promise<string> {
+  try {
+    const body = (await res.json()) as { error?: { message?: string } };
+    return (body.error?.message ?? '').slice(0, 200) || 'no details';
+  } catch {
+    return 'no details';
+  }
+}
+
+// Flash models this key can call, newest first, so a retired model name is easy to replace.
+async function availableFlashModels(env: AiEnv): Promise<string[]> {
+  try {
+    const res = await fetch(`${env.GEMINI_BASE_URL || ENDPOINT}?pageSize=200`, { headers: { 'x-goog-api-key': env.GEMINI_API_KEY ?? '' } });
+    if (!res.ok) return [];
+    const data = (await res.json()) as { models?: { name: string; supportedGenerationMethods?: string[] }[] };
+    return (data.models ?? [])
+      .filter((m) => m.supportedGenerationMethods?.includes('generateContent'))
+      .map((m) => m.name.replace(/^models\//, ''))
+      .filter((n) => /flash/.test(n) && !/(tts|image|audio|live|preview|exp)/.test(n))
+      .sort()
+      .reverse()
+      .slice(0, 5);
+  } catch {
+    return [];
   }
 }
 
