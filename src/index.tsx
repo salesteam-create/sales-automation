@@ -284,8 +284,10 @@ app.post('/agencies/:id/followup', async (c) => {
     case 'done':
       await markFollowupDone(c.env.DB, agency, str(f.replied) === '1', str(f.note), today);
       return back(c, fallback, f.back, `Follow-up logged for ${agency.name}.`);
+    case 'snooze3':
+    case 'snooze7':
     case 'snooze': {
-      const days = Number(f.days) || 3;
+      const days = str(f.action) === 'snooze7' ? 7 : str(f.action) === 'snooze3' ? 3 : Number(f.days) || 3;
       await setNextFollowup(c.env.DB, agency.id, addDays(today, days));
       return back(c, fallback, f.back, `${agency.name} snoozed ${days} days.`);
     }

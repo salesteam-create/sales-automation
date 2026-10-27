@@ -27,25 +27,21 @@ const STATUS_COLORS: Record<string, string> = {
 
 // ---------- shared pieces ----------
 
+// "Done" means the follow-up was sent and no reply has come in yet. A reply is recorded by logging it
+// ("Log meeting or note"), which resets the no-reply count; 3 Dones in a row without one trigger a downgrade suggestion.
 const FollowupActions: FC<{ agency: Agency; back: string }> = ({ agency, back }) => (
-  <div class="row small" style="margin-top:6px">
-    <form class="inline" method="post" action={`/agencies/${agency.id}/followup`}>
-      <input type="hidden" name="back" value={back} />
-      <input type="hidden" name="action" value="done" />
-      <button type="submit" name="replied" value="0" title="You followed up and are waiting for a reply">Done, no reply</button>
-    </form>
-    <form class="inline" method="post" action={`/agencies/${agency.id}/followup`}>
-      <input type="hidden" name="back" value={back} />
-      <input type="hidden" name="action" value="done" />
-      <button type="submit" name="replied" value="1">Done, they replied</button>
-    </form>
-    <form class="inline" method="post" action={`/agencies/${agency.id}/followup`}>
-      <input type="hidden" name="back" value={back} />
-      <input type="hidden" name="action" value="snooze" />
-      <button type="submit" name="days" value="3">Snooze 3d</button>
-      <button type="submit" name="days" value="7">Snooze 1w</button>
-    </form>
-  </div>
+  <form class="row small" method="post" action={`/agencies/${agency.id}/followup`} style="margin-top:6px">
+    <input type="hidden" name="back" value={back} />
+    <button type="submit" name="action" value="done" title="You followed up. If they reply, log it with Log meeting or note.">
+      Done
+    </button>
+    <button type="submit" name="action" value="snooze3">
+      Snooze 3 days
+    </button>
+    <button type="submit" name="action" value="snooze7">
+      Snooze 1 week
+    </button>
+  </form>
 );
 
 const SuggestionItem: FC<{ s: Suggestion; back: string; showAgency?: boolean }> = ({ s, back, showAgency }) => (
