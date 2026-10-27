@@ -8,6 +8,25 @@ import { STATUSES } from './rules';
 
 export type Range = 'week' | 'month' | 'quarter' | 'all';
 
+// Counts beside the sidebar items. Cheap enough to load on every page.
+export interface Nav {
+  today: number;
+  agencies: number;
+  importIssues: number;
+}
+
+export async function loadNav(db: D1Database, today: string): Promise<Nav> {
+  const row = await db
+    .prepare(
+      `SELECT (SELECT COUNT(*) FROM agencies WHERE next_followup_date IS NOT NULL AND next_followup_date <= ?) AS due,
+              (SELECT COUNT(*) FROM agencies) AS total,
+              (SELECT COUNT(*) FROM import_issues WHERE resolved = 0) AS issues`,
+    )
+    .bind(today)
+    .first<{ due: number; total: number; issues: number }>();
+  return { today: row?.due ?? 0, agencies: row?.total ?? 0, importIssues: row?.issues ?? 0 };
+}
+
 export function rangeStart(range: Range, today: string): string | null {
   switch (range) {
     case 'week':
@@ -33,6 +52,8 @@ export interface Dashboard {
   dueToday: Agency[];
   suggestions: Suggestion[];
   webUpdates: WebChange[];
+  activity: (TimelineEntry & { agency_name: string })[];
+  total: number;
 }
 
 export async function loadDashboard(db: D1Database, range: Range, today: string): Promise<Dashboard> {
@@ -40,7 +61,7 @@ export async function loadDashboard(db: D1Database, range: Range, today: string)
   const rangeSql = start ? `WHERE ${FIRST_MET} >= ?` : '';
   const rangeBinds = start ? [start] : [];
 
-  const [statusRows, countryRows, deals, overdue, dueToday, suggestions, webUpdates] = await Promise.all([
+  const [statusRows, countryRows, deals, overdue, dueToday, suggestions, webUpdates, activity] = await Promise.all([
     db.prepare(`SELECT a.status, COUNT(*) AS n FROM agencies a ${rangeSql} GROUP BY a.status`).bind(...rangeBinds).all<{ status: string; n: number }>(),
     db
       .prepare(`SELECT COALESCE(a.country, 'Unknown') AS country, a.status, COUNT(*) AS n FROM agencies a ${rangeSql} GROUP BY 1, 2`)
@@ -57,6 +78,12 @@ export async function loadDashboard(db: D1Database, range: Range, today: string)
     db.prepare(`SELECT * FROM agencies WHERE next_followup_date = ? ORDER BY name`).bind(today).all<Agency>(),
     pendingSuggestions(db),
     recentChanges(db),
+    db
+      .prepare(
+        `SELECT t.*, a.name AS agency_name FROM timeline t JOIN agencies a ON a.id = t.agency_id
+         WHERE t.source = 'app' ORDER BY COALESCE(t.date, substr(t.created_at, 1, 10)) DESC, t.created_at DESC LIMIT 8`,
+      )
+      .all<TimelineEntry & { agency_name: string }>(),
   ]);
 
   const counts = new Map(statusRows.results.map((r) => [r.status, r.n]));
@@ -79,40 +106,43 @@ export async function loadDashboard(db: D1Database, range: Range, today: string)
     dueToday: dueToday.results,
     suggestions,
     webUpdates,
+    activity: activity.results,
+    total: pipeline.reduce((sum, p) => sum + p.count, 0),
   };
 }
 
 export interface Feed {
   overdue: Agency[];
   dueToday: Agency[];
+  // Due in the next seven days, so Today can show what is coming without a second screen.
+  upcoming: Agency[];
+  completed: number;
   suggestions: Suggestion[];
   webUpdates: WebChange[];
-  yesterday: (TimelineEntry & { agency_name: string })[];
-}
-
-// created_at is UTC; an IST day runs from 18:30 UTC the previous day.
-function istDayToUtcRange(day: string): [string, string] {
-  const start = new Date(Date.parse(day + 'T00:00:00+05:30')).toISOString().replace('T', ' ').slice(0, 19);
-  const end = new Date(Date.parse(addDays(day, 1) + 'T00:00:00+05:30')).toISOString().replace('T', ' ').slice(0, 19);
-  return [start, end];
 }
 
 export async function loadFeed(db: D1Database, today: string): Promise<Feed> {
-  const [from, to] = istDayToUtcRange(addDays(today, -1));
-  const [overdue, dueToday, suggestions, webUpdates, yesterday] = await Promise.all([
+  const weekAhead = addDays(today, 7);
+  const weekBack = addDays(today, -6);
+  const [overdue, dueToday, upcoming, completed, suggestions, webUpdates] = await Promise.all([
     db.prepare(`SELECT * FROM agencies WHERE next_followup_date < ? ORDER BY next_followup_date, name`).bind(today).all<Agency>(),
     db.prepare(`SELECT * FROM agencies WHERE next_followup_date = ? ORDER BY name`).bind(today).all<Agency>(),
+    db
+      .prepare(`SELECT * FROM agencies WHERE next_followup_date > ? AND next_followup_date <= ? ORDER BY next_followup_date, name`)
+      .bind(today, weekAhead)
+      .all<Agency>(),
+    db.prepare(`SELECT COUNT(*) AS n FROM timeline WHERE type = 'followup' AND date >= ?`).bind(weekBack).first<{ n: number }>(),
     pendingSuggestions(db),
     recentChanges(db),
-    db
-      .prepare(
-        `SELECT t.*, a.name AS agency_name FROM timeline t JOIN agencies a ON a.id = t.agency_id
-         WHERE t.source = 'app' AND t.created_at >= ? AND t.created_at < ? ORDER BY t.created_at`,
-      )
-      .bind(from, to)
-      .all<TimelineEntry & { agency_name: string }>(),
   ]);
-  return { overdue: overdue.results, dueToday: dueToday.results, suggestions, webUpdates, yesterday: yesterday.results };
+  return {
+    overdue: overdue.results,
+    dueToday: dueToday.results,
+    upcoming: upcoming.results,
+    completed: completed?.n ?? 0,
+    suggestions,
+    webUpdates,
+  };
 }
 
 // Website intelligence and recent changes, as plain text for the next-steps prompt. Website content is public.

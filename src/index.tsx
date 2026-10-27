@@ -13,16 +13,19 @@ import {
   logConversation,
   markFollowupDone,
   pendingSuggestions,
+  isSort,
   recomputeLastContact,
   resolveSuggestion,
   setNextFollowup,
+  type Sort,
 } from './db';
 import { buildImportPlan, planStatements } from './import';
 import { getChanges, getIntel, getPages, refreshAgencyStep, runCrawlTick, type IntelEnv } from './intel';
 import { redact } from './redact';
-import { loadDashboard, loadFeed, refreshNextSteps, runDailyJob, type Range } from './reports';
+import { loadDashboard, loadFeed, loadNav, refreshNextSteps, runDailyJob, type Range } from './reports';
 import { PAGE_KINDS } from './web';
 import { FRAMEWORK_OPTIONS, isAllowedCombo, isLeadStatus, isStatus, nextFollowupDate, statusForLead } from './rules';
+import { CSS, CSS_VERSION } from './views/theme';
 import {
   AgencyListPage,
   AgencyPage,
@@ -34,6 +37,7 @@ import {
   LogPage,
   NewAgencyPage,
   ReviewPage,
+  type FeedTab,
   type ImportIssueRow,
 } from './views/pages';
 
@@ -64,18 +68,34 @@ async function loadAgencyOr404(c: Context<{ Bindings: Env }>) {
   return Number.isInteger(id) ? getAgency(c.env.DB, id) : null;
 }
 
+// ---------- stylesheet ----------
+
+// Versioned in the URL, so it can be cached hard and still change the moment the design system does.
+app.get('/app.css', (c) =>
+  c.body(CSS, 200, {
+    'content-type': 'text/css; charset=utf-8',
+    'cache-control': c.req.query('v') === CSS_VERSION ? 'public, max-age=31536000, immutable' : 'public, max-age=0, must-revalidate',
+  }),
+);
+
 // ---------- pages ----------
+
+const FEED_TABS = ['all', 'overdue', 'today', 'upcoming'] as const;
 
 app.get('/', async (c) => {
   const today = todayIST();
-  return c.html(<FeedPage feed={await loadFeed(c.env.DB, today)} today={today} msg={c.req.query('msg')} />);
+  const q = c.req.query('tab');
+  const tab: FeedTab = (FEED_TABS as readonly string[]).includes(q ?? '') ? (q as FeedTab) : 'all';
+  const [feed, nav] = await Promise.all([loadFeed(c.env.DB, today), loadNav(c.env.DB, today)]);
+  return c.html(<FeedPage feed={feed} tab={tab} today={today} nav={nav} msg={c.req.query('msg')} />);
 });
 
 app.get('/dashboard', async (c) => {
   const today = todayIST();
   const q = c.req.query('range');
   const range: Range = q === 'week' || q === 'month' || q === 'quarter' ? q : 'all';
-  return c.html(<DashboardPage d={await loadDashboard(c.env.DB, range, today)} range={range} today={today} currency={c.env.CURRENCY} />);
+  const [d, nav] = await Promise.all([loadDashboard(c.env.DB, range, today), loadNav(c.env.DB, today)]);
+  return c.html(<DashboardPage d={d} range={range} today={today} nav={nav} currency={c.env.CURRENCY} />);
 });
 
 app.get('/agencies', async (c) => {
@@ -86,22 +106,50 @@ app.get('/agencies', async (c) => {
     lead: c.req.query('lead') || undefined,
     country: c.req.query('country') || undefined,
     overdue: c.req.query('overdue') === '1',
+    deal: c.req.query('deal') === '1',
   };
-  const [agencies, countries] = await Promise.all([listAgencies(c.env.DB, { ...filters, today }), listCountries(c.env.DB)]);
-  return c.html(<AgencyListPage agencies={agencies} countries={countries} filters={filters} today={today} />);
+  const sortParam = c.req.query('sort');
+  const sort: Sort = isSort(sortParam) ? sortParam : 'next';
+  const page = Math.max(1, Number(c.req.query('page')) || 1);
+  const [list, countries, nav] = await Promise.all([
+    listAgencies(c.env.DB, { ...filters, today, sort, page }),
+    listCountries(c.env.DB),
+    loadNav(c.env.DB, today),
+  ]);
+  return c.html(
+    <AgencyListPage
+      agencies={list.agencies}
+      countries={countries}
+      filters={filters}
+      sort={sort}
+      page={list.page}
+      pageSize={list.pageSize}
+      total={list.total}
+      grandTotal={nav.agencies}
+      today={today}
+      nav={nav}
+      msg={c.req.query('msg')}
+    />,
+  );
 });
 
-app.get('/agencies/new', (c) => c.html(<NewAgencyPage />));
+app.get('/agencies/new', async (c) => {
+  const today = todayIST();
+  return c.html(<NewAgencyPage today={today} nav={await loadNav(c.env.DB, today)} />);
+});
 
 app.post('/agencies', async (c) => {
   const f = await c.req.parseBody();
   const name = str(f.name);
   const status = f.status;
   const lead = f.lead_status;
-  if (!name || !isStatus(status) || !isLeadStatus(lead) || !isAllowedCombo(status, lead)) {
-    return c.html(<NewAgencyPage error="Please give a name and an allowed Status / Lead Status combination." />, 400);
-  }
   const today = todayIST();
+  if (!name || !isStatus(status) || !isLeadStatus(lead) || !isAllowedCombo(status, lead)) {
+    return c.html(
+      <NewAgencyPage today={today} nav={await loadNav(c.env.DB, today)} error="Please give a name and an allowed stage and lead temperature." />,
+      400,
+    );
+  }
   const row = await c.env.DB.prepare(
     `INSERT INTO agencies (name, website, country, status, lead_status, next_followup_date) VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
   )
@@ -117,7 +165,8 @@ app.get('/agencies/:id', async (c) => {
   const agency = await loadAgencyOr404(c);
   if (!agency) return c.notFound();
   const db = c.env.DB;
-  const [contacts, timeline, suggestions, issues, intel, pages, changes] = await Promise.all([
+  const today = todayIST();
+  const [contacts, timeline, suggestions, issues, intel, pages, changes, nav] = await Promise.all([
     getContacts(db, agency.id),
     getTimeline(db, agency.id),
     pendingSuggestions(db, agency.id),
@@ -128,6 +177,7 @@ app.get('/agencies/:id', async (c) => {
     getIntel(db, agency.id),
     getPages(db, agency.id),
     getChanges(db, agency.id),
+    loadNav(db, today),
   ]);
   return c.html(
     <AgencyPage
@@ -139,7 +189,8 @@ app.get('/agencies/:id', async (c) => {
       intel={intel}
       pages={pages}
       changes={changes}
-      today={todayIST()}
+      today={today}
+      nav={nav}
       currency={c.env.CURRENCY}
       msg={c.req.query('msg')}
       error={c.req.query('error')}
@@ -201,9 +252,19 @@ app.post('/contacts/:cid', async (c) => {
 app.get('/agencies/:id/edit', async (c) => {
   const agency = await loadAgencyOr404(c);
   if (!agency) return c.notFound();
-  const [contacts, timeline] = await Promise.all([getContacts(c.env.DB, agency.id), getTimeline(c.env.DB, agency.id)]);
+  const today = todayIST();
+  const [contacts, timeline, nav] = await Promise.all([getContacts(c.env.DB, agency.id), getTimeline(c.env.DB, agency.id), loadNav(c.env.DB, today)]);
   return c.html(
-    <EditAgencyPage agency={agency} contacts={contacts} timeline={timeline} currency={c.env.CURRENCY} msg={c.req.query('msg')} error={c.req.query('error')} />,
+    <EditAgencyPage
+      agency={agency}
+      contacts={contacts}
+      timeline={timeline}
+      currency={c.env.CURRENCY}
+      today={today}
+      nav={nav}
+      msg={c.req.query('msg')}
+      error={c.req.query('error')}
+    />,
   );
 });
 
@@ -294,6 +355,9 @@ app.post('/agencies/:id/followup', async (c) => {
     case 'reschedule':
       if (isValidDay(str(f.date))) await setNextFollowup(c.env.DB, agency.id, str(f.date));
       return back(c, fallback, f.back, 'Follow-up rescheduled.');
+    case 'clear':
+      await setNextFollowup(c.env.DB, agency.id, null);
+      return back(c, fallback, f.back, `Follow-up cleared for ${agency.name}.`);
   }
   return back(c, fallback, f.back);
 });
@@ -351,7 +415,8 @@ app.post('/pages/:pid/delete', async (c) => {
 app.get('/agencies/:id/log', async (c) => {
   const agency = await loadAgencyOr404(c);
   if (!agency) return c.notFound();
-  return c.html(<LogPage agency={agency} today={todayIST()} />);
+  const today = todayIST();
+  return c.html(<LogPage agency={agency} today={today} nav={await loadNav(c.env.DB, today)} />);
 });
 
 app.post('/agencies/:id/log/analyze', async (c) => {
@@ -362,7 +427,9 @@ app.post('/agencies/:id/log/analyze', async (c) => {
   const date = isValidDay(str(f.date)) && str(f.date) <= today ? str(f.date) : today;
   const type = str(f.type) || 'meeting';
   const notes = str(f.notes);
-  if (!notes) return c.html(<LogPage agency={agency} today={today} error="Please paste some notes." />, 400);
+  if (!notes) {
+    return c.html(<LogPage agency={agency} today={today} nav={await loadNav(c.env.DB, today)} error="Please paste some notes." />, 400);
+  }
 
   let analysis: NoteAnalysis | null = null;
   let aiError: string | null = null;
@@ -382,7 +449,18 @@ app.post('/agencies/:id/log/analyze', async (c) => {
       aiError = err.message;
     }
   }
-  return c.html(<ReviewPage agency={agency} date={date} type={type} notes={notes} analysis={analysis} aiError={aiError} />);
+  return c.html(
+    <ReviewPage
+      agency={agency}
+      date={date}
+      type={type}
+      notes={notes}
+      analysis={analysis}
+      aiError={aiError}
+      today={today}
+      nav={await loadNav(c.env.DB, today)}
+    />,
+  );
 });
 
 app.post('/agencies/:id/log/save', async (c) => {
@@ -436,20 +514,27 @@ async function hasData(db: D1Database): Promise<boolean> {
   return !!(await db.prepare('SELECT 1 FROM agencies LIMIT 1').first());
 }
 
-app.get('/import', async (c) => c.html(<ImportPage hasData={await hasData(c.env.DB)} />));
+app.get('/import', async (c) => {
+  const today = todayIST();
+  const [has, nav] = await Promise.all([hasData(c.env.DB), loadNav(c.env.DB, today)]);
+  return c.html(<ImportPage hasData={has} today={today} nav={nav} />);
+});
 
 app.post('/import', async (c) => {
   const db = c.env.DB;
+  const today = todayIST();
   const f = await c.req.parseBody();
-  const exists = await hasData(db);
-  if (exists && str(f.replace) !== '1') return c.html(<ImportPage hasData error="Tick the box to confirm replacing existing data." />, 400);
+  const [exists, nav] = await Promise.all([hasData(db), loadNav(db, today)]);
+  if (exists && str(f.replace) !== '1') {
+    return c.html(<ImportPage hasData today={today} nav={nav} error="Tick the box to confirm replacing existing data." />, 400);
+  }
   const file = f.file;
-  if (!(file instanceof File)) return c.html(<ImportPage hasData={exists} error="Please choose the CSV file." />, 400);
+  if (!(file instanceof File)) return c.html(<ImportPage hasData={exists} today={today} nav={nav} error="Please choose the CSV file." />, 400);
   let plan;
   try {
-    plan = buildImportPlan(await file.text(), { today: todayIST() });
+    plan = buildImportPlan(await file.text(), { today });
   } catch (err) {
-    return c.html(<ImportPage hasData={exists} error={(err as Error).message} />, 400);
+    return c.html(<ImportPage hasData={exists} today={today} nav={nav} error={(err as Error).message} />, 400);
   }
   const wipe = ['web_changes', 'agency_intel', 'watched_pages', 'import_issues', 'suggestions', 'timeline', 'contacts', 'agencies'].map((t) =>
     db.prepare(`DELETE FROM ${t}`),
@@ -462,11 +547,15 @@ app.post('/import', async (c) => {
 });
 
 app.get('/import/report', async (c) => {
-  const issues = await c.env.DB.prepare(
-    `SELECT i.*, a.name AS agency_name FROM import_issues i LEFT JOIN agencies a ON a.id = i.agency_id
-     WHERE i.resolved = 0 ORDER BY i.row_number, i.id`,
-  ).all<ImportIssueRow>();
-  return c.html(<ImportReportPage issues={issues.results} msg={c.req.query('msg')} />);
+  const today = todayIST();
+  const [issues, nav] = await Promise.all([
+    c.env.DB.prepare(
+      `SELECT i.*, a.name AS agency_name FROM import_issues i LEFT JOIN agencies a ON a.id = i.agency_id
+       WHERE i.resolved = 0 ORDER BY i.row_number, i.id`,
+    ).all<ImportIssueRow>(),
+    loadNav(c.env.DB, today),
+  ]);
+  return c.html(<ImportReportPage issues={issues.results} today={today} nav={nav} msg={c.req.query('msg')} />);
 });
 
 app.post('/import-issues/:iid/resolve', async (c) => {

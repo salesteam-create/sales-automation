@@ -103,10 +103,38 @@ export interface AgencyFilters {
   lead?: string;
   country?: string;
   overdue?: boolean;
+  deal?: boolean;
   today: string;
+  sort?: Sort;
+  page?: number;
+  pageSize?: number;
 }
 
-export async function listAgencies(db: D1Database, f: AgencyFilters): Promise<Agency[]> {
+export const SORTS = ['next', 'name', 'last', 'noreply'] as const;
+export type Sort = (typeof SORTS)[number];
+
+export function isSort(v: unknown): v is Sort {
+  return (SORTS as readonly unknown[]).includes(v);
+}
+
+const ORDER_BY: Record<Sort, string> = {
+  // Nulls last in every case: an agency with no date is never the most urgent.
+  next: 'CASE WHEN next_followup_date IS NULL THEN 1 ELSE 0 END, next_followup_date, name',
+  name: 'name COLLATE NOCASE',
+  last: 'CASE WHEN last_contact_date IS NULL THEN 1 ELSE 0 END, last_contact_date DESC, name',
+  noreply: 'unanswered_count DESC, name',
+};
+
+export const PAGE_SIZE = 25;
+
+export interface AgencyPage {
+  agencies: Agency[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export async function listAgencies(db: D1Database, f: AgencyFilters): Promise<AgencyPage> {
   const where: string[] = [];
   const binds: unknown[] = [];
   if (f.q) {
@@ -129,9 +157,18 @@ export async function listAgencies(db: D1Database, f: AgencyFilters): Promise<Ag
     where.push('next_followup_date < ?');
     binds.push(f.today);
   }
-  const sql = `SELECT * FROM agencies ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-    ORDER BY CASE WHEN next_followup_date IS NULL THEN 1 ELSE 0 END, next_followup_date, name`;
-  return (await db.prepare(sql).bind(...binds).all<Agency>()).results;
+  if (f.deal) {
+    where.push('(deal_description IS NOT NULL OR deal_value IS NOT NULL)');
+  }
+  const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
+  const sql = `SELECT * FROM agencies ${whereSql} ORDER BY ${ORDER_BY[f.sort ?? 'next']} LIMIT ? OFFSET ?`;
+  const size = f.pageSize ?? PAGE_SIZE;
+  const count = await db.prepare(`SELECT COUNT(*) AS n FROM agencies ${whereSql}`).bind(...binds).first<{ n: number }>();
+  const total = count?.n ?? 0;
+  // A page number past the end shows the last page, not an empty one that reads like "no matches".
+  const page = Math.min(Math.max(1, f.page ?? 1), Math.max(1, Math.ceil(total / size)));
+  const rows = await db.prepare(sql).bind(...binds, size, (page - 1) * size).all<Agency>();
+  return { agencies: rows.results, total, page, pageSize: size };
 }
 
 export async function listCountries(db: D1Database): Promise<string[]> {

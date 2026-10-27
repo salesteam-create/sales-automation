@@ -1,0 +1,64 @@
+
+/* ================= app layout ================= */
+
+.crumb { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-muted); margin-bottom: 10px; }
+.crumb a:hover { text-decoration: underline; }
+
+.split { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: var(--space-4); align-items: start; }
+.rail { display: grid; gap: var(--space-4); align-content: start; }
+
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 8px 14px; font-size: 13px; line-height: 19px; margin: 0; }
+.kv dt { color: var(--ink-muted); }
+.kv dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
+
+.steps { margin: 0; padding-left: 20px; font-size: 14px; line-height: 22px; }
+.steps li + li { margin-top: 5px; }
+
+.tl { list-style: none; margin: 0; padding: 0; }
+.tl > li { padding: var(--space-4); border-top: 1px solid var(--border); }
+.tl > li:first-child { border-top: 0; }
+.tl p { margin: 0; }
+.tl p + p { margin-top: 6px; }
+
+.due-strip { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; padding: 12px 14px; border-radius: var(--radius-sm); background: var(--surface-muted); margin-bottom: 14px; }
+.due-strip.late { background: var(--danger-soft); }
+.due-strip .actions { margin-left: auto; }
+
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border); }
+.toolbar .right { margin-left: auto; display: flex; align-items: center; gap: var(--space-2); }
+
+.deal { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--border); }
+.deal:first-child { border-top: 0; padding-top: 0; }
+.deal .amt { margin-left: auto; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.hbar .nm { display: flex; align-items: center; gap: 6px; }
+
+.form-grid { display: grid; gap: var(--space-3); grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+.form-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; margin-top: var(--space-4); }
+.edit-block { padding: var(--space-4); border-top: 1px solid var(--border); }
+.edit-block:first-of-type { border-top: 0; }
+
+.notes { margin: 6px 0 0; font: inherit; font-size: 13px; line-height: 19px; color: var(--ink-muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+details > summary { cursor: pointer; color: var(--brand-ink); font-size: 13px; }
+details > summary:hover { text-decoration: underline; }
+details.menu > summary { color: inherit; }
+
+.danger-zone { border-color: var(--danger); }
+.danger-zone .panel-hd h2 { color: var(--danger); }
+
+.chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* The wordmark appears in the top bar only where the sidebar that normally carries it is hidden. */
+.brand-sm { display: none; }
+
+@media (max-width: 900px) {
+  .brand-sm { display: inline-flex; align-items: center; }
+  /* A basis wide enough that the two header buttons take a line of their own below the badges. */
+  .page-hd .acts .btn { flex: 1 1 140px; }
+  .split { grid-template-columns: minmax(0, 1fr); }
+  .due-strip .actions { margin-left: 0; width: 100%; }
+  .due-strip .actions > form { flex: 1 1 auto; }
+  .due-strip .actions .btn { width: 100%; height: 40px; }
+  .toolbar .right { margin-left: 0; width: 100%; }
+  .kv dd { text-align: left; }
+}
