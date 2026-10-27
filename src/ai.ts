@@ -6,6 +6,7 @@ import { LEAD_STATUSES, STATUSES, isLeadStatus, isStatus, type LeadStatus, type 
 export interface AiEnv {
   GEMINI_API_KEY?: string;
   GEMINI_MODEL: string;
+  GEMINI_FALLBACK_MODEL?: string; // used when the main model is overloaded or times out
   GEMINI_BASE_URL?: string; // only for local testing against a mock
 }
 
@@ -18,9 +19,9 @@ const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
 const THINKING = { thinkingConfig: { thinkingLevel: 'low' } };
 const TIMEOUT_MS = 45_000;
 
-async function callGemini(env: AiEnv, prompt: string, schema: object, thinking: boolean): Promise<Response | 'timeout'> {
+async function callGemini(env: AiEnv, model: string, prompt: string, schema: object, thinking: boolean): Promise<Response | 'timeout'> {
   try {
-    return await fetch(`${env.GEMINI_BASE_URL || ENDPOINT}/${env.GEMINI_MODEL}:generateContent`, {
+    return await fetch(`${env.GEMINI_BASE_URL || ENDPOINT}/${model}:generateContent`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY ?? '' },
       body: JSON.stringify({
@@ -37,19 +38,22 @@ async function callGemini(env: AiEnv, prompt: string, schema: object, thinking: 
 
 export async function generateJson<T>(env: AiEnv, prompt: string, schema: object): Promise<T> {
   if (!env.GEMINI_API_KEY) throw new AiUnavailableError('AI is not set up yet (GEMINI_API_KEY missing).');
+  // Main model first (with one retry), then the fallback model when Google is overloaded or slow.
+  const models = [env.GEMINI_MODEL, env.GEMINI_MODEL, env.GEMINI_FALLBACK_MODEL].filter((m): m is string => !!m);
   let thinking = true;
   let res: Response | 'timeout' = 'timeout';
-  for (let attempt = 0; attempt < 3; attempt++) {
-    res = await callGemini(env, prompt, schema, thinking);
+  for (let i = 0; i < models.length; i++) {
+    res = await callGemini(env, models[i], prompt, schema, thinking);
     if (res !== 'timeout' && res.status === 400 && thinking) {
       const msg = await googleError(res.clone());
       if (/think/i.test(msg)) {
         thinking = false; // this model does not take the thinking setting
+        i--;
         continue;
       }
     }
-    const retryable = res === 'timeout' || res.status >= 500;
-    if (!retryable || attempt === 1) break;
+    const busy = res === 'timeout' || res.status >= 500 || res.status === 429;
+    if (!busy) break;
   }
   if (res === 'timeout') throw new AiUnavailableError('The AI took too long to answer. Try again in a minute.');
   if (res.status === 429) throw new AiUnavailableError('AI free-tier limit reached. Try again later.');

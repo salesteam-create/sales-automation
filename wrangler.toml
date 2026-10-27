@@ -5,6 +5,8 @@ compatibility_date = "2026-10-01"
 [vars]
 # Gemini model used for all AI features. "gemini-flash-latest" follows Google's current Flash model, so it does not break when versions retire.
 GEMINI_MODEL = "gemini-flash-latest"
+# Lighter model used automatically when the main one is overloaded (free-tier keys are turned away first).
+GEMINI_FALLBACK_MODEL = "gemini-flash-lite-latest"
 # Currency label for deal values on the dashboard.
 CURRENCY = "EUR"
 # Max agencies whose AI next steps are refreshed per daily run (keeps within free-tier limits).

@@ -36,3 +36,15 @@ describe('generateJson', () => {
     await expect(generateJson({ GEMINI_MODEL: 'm' }, 'p', {})).rejects.toBeInstanceOf(AiUnavailableError);
   });
 });
+
+describe('fallback model', () => {
+  it('switches to the fallback model when the main one is overloaded', async () => {
+    const urls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (u: string) => {
+      urls.push(u);
+      return u.includes('/lite:') ? ok({ c: 3 }) : new Response(JSON.stringify({ error: { message: 'high demand' } }), { status: 503 });
+    }));
+    expect(await generateJson({ ...env, GEMINI_FALLBACK_MODEL: 'lite' }, 'p', {})).toEqual({ c: 3 });
+    expect(urls.map((u) => u.split('/').pop())).toEqual(['m:generateContent', 'm:generateContent', 'lite:generateContent']);
+  });
+});
