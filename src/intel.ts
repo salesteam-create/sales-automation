@@ -9,6 +9,7 @@ import { diffText, discoverPages, extractText, fetchPage, hashText, isMeaningful
 
 export interface IntelEnv extends AiEnv {
   AI_DAILY_BUDGET?: string;
+  NEXT_STEPS_DAILY_LIMIT?: string;
   CRAWL_PAGES_PER_TICK?: string;
   CRAWL_AI_PER_TICK?: string;
 }
@@ -72,12 +73,13 @@ export const CHANGE_LABELS: Record<string, string> = {
 // ---------- AI budget ----------
 
 // Background work stops at the daily budget; actions Chabert starts himself are always allowed but counted.
-export async function takeAiCall(db: D1Database, env: IntelEnv, background: boolean): Promise<boolean> {
+// `reserve` keeps calls back for later work the same day (the overnight scan leaves room for the 06:30 next steps).
+export async function takeAiCall(db: D1Database, env: IntelEnv, background: boolean, reserve = 0): Promise<boolean> {
   const day = todayIST();
   const budget = Number(env.AI_DAILY_BUDGET ?? '200') || 200;
   if (background) {
     const row = await db.prepare('SELECT calls FROM ai_usage WHERE day = ?').bind(day).first<{ calls: number }>();
-    if ((row?.calls ?? 0) >= budget) return false;
+    if ((row?.calls ?? 0) >= budget - reserve) return false;
   }
   await db.prepare('INSERT INTO ai_usage (day, calls) VALUES (?, 1) ON CONFLICT(day) DO UPDATE SET calls = calls + 1').bind(day).run();
   return true;
@@ -159,16 +161,19 @@ export async function discoverAgencyPages(db: D1Database, agency: Agency): Promi
     p.kind === 'home'
       ? db
           .prepare(
-            `INSERT INTO watched_pages (agency_id, kind, url, last_checked_at, last_status, content_hash, content_text)
-             VALUES (?, 'home', ?, datetime('now'), 'ok', ?, ?) ON CONFLICT(agency_id, url) DO NOTHING`,
+            `INSERT INTO watched_pages (agency_id, kind, url, last_checked_at, last_status, last_error, content_hash, content_text)
+             VALUES (?, 'home', ?, datetime('now'), ?, ?, ?, ?) ON CONFLICT(agency_id, url) DO NOTHING`,
           )
-          .bind(agency.id, p.url, hash, text)
+          .bind(agency.id, p.url, text ? 'ok' : 'error', text ? null : NO_TEXT, hash, text || null)
       : db.prepare(`INSERT INTO watched_pages (agency_id, kind, url) VALUES (?, ?, ?) ON CONFLICT(agency_id, url) DO NOTHING`).bind(agency.id, p.kind, p.url),
   );
   stmts.push(db.prepare(`UPDATE agencies SET pages_discovered_at = datetime('now'), intel_stale = 1 WHERE id = ?`).bind(agency.id));
   await db.batch(stmts);
   return `Found ${pages.length} pages`;
 }
+
+// Shown when a page loads but has no text we can read, usually because it is built in the browser by JavaScript.
+const NO_TEXT = 'No readable text (the page is built with JavaScript)';
 
 // Fetches one page and compares it with the last snapshot. The first snapshot is only a baseline.
 export async function checkPage(db: D1Database, page: WatchedPage): Promise<'changed' | 'unchanged' | 'baseline' | 'error'> {
@@ -181,6 +186,13 @@ export async function checkPage(db: D1Database, page: WatchedPage): Promise<'cha
     return 'error';
   }
   const text = extractText(res.html);
+  if (!text) {
+    await db
+      .prepare(`UPDATE watched_pages SET last_checked_at = datetime('now'), last_status = 'error', last_error = ? WHERE id = ?`)
+      .bind(NO_TEXT, page.id)
+      .run();
+    return 'error';
+  }
   const hash = await hashText(text);
   const update = db
     .prepare(`UPDATE watched_pages SET last_checked_at = datetime('now'), last_status = 'ok', last_error = NULL, content_hash = ?, content_text = ? WHERE id = ?`)
@@ -335,7 +347,11 @@ const INTEL_SCHEMA = {
 // One AI call: their services, the Kilowott services they lack (pitch list), and upsell from their case studies.
 export async function buildIntel(db: D1Database, env: IntelEnv, agency: Agency): Promise<boolean> {
   const pages = (await getPages(db, agency.id)).filter((p) => p.content_text);
-  if (!pages.length) return false;
+  if (!pages.length) {
+    // Nothing readable on the site; leave it out of the queue until a page yields text.
+    await db.prepare('UPDATE agencies SET intel_stale = 0 WHERE id = ?').bind(agency.id).run();
+    return false;
+  }
   const order: PageKind[] = ['services', 'work', 'home', 'news', 'careers'];
   pages.sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind));
   const prompt = `${KILOWOTT_CONTEXT}
@@ -414,6 +430,9 @@ export async function refreshAgencyStep(db: D1Database, env: IntelEnv, agencyId:
   return { done: true, message: 'Up to date' };
 }
 
+// Agencies whose AI work failed recently are parked (see crawlTick) and skipped until the park expires.
+const NOT_SKIPPED = `NOT EXISTS (SELECT 1 FROM job_locks l WHERE l.name = 'skip:' || a.id AND l.until > datetime('now'))`;
+
 // Returns false when another run holds the lock. The lock expires on its own if a run dies.
 async function acquireLock(db: D1Database, name: string, seconds: number): Promise<boolean> {
   const row = await db
@@ -444,6 +463,7 @@ export async function runCrawlTick(db: D1Database, env: IntelEnv): Promise<strin
 async function crawlTick(db: D1Database, env: IntelEnv): Promise<string> {
   const pagesPerTick = Number(env.CRAWL_PAGES_PER_TICK ?? '6') || 6;
   const aiPerTick = Number(env.CRAWL_AI_PER_TICK ?? '2') || 2;
+  const reserve = Number(env.NEXT_STEPS_DAILY_LIMIT ?? '20') || 20;
   // Start of today's IST night run (18:00 UTC the previous evening) marks "checked tonight".
   const nightStart = new Date(Date.now() - 12 * 3600_000).toISOString().replace('T', ' ').slice(0, 19);
   let fetches = 0;
@@ -475,22 +495,26 @@ async function crawlTick(db: D1Database, env: IntelEnv): Promise<string> {
 
   for (let i = 0; i < aiPerTick; i++) {
     const labelFor = await db
-      .prepare(`SELECT a.* FROM agencies a WHERE EXISTS (SELECT 1 FROM web_changes c WHERE c.agency_id = a.id AND c.label IS NULL) LIMIT 1`)
+      .prepare(
+        `SELECT a.* FROM agencies a WHERE EXISTS (SELECT 1 FROM web_changes c WHERE c.agency_id = a.id AND c.label IS NULL)
+         AND ${NOT_SKIPPED} LIMIT 1`,
+      )
       .first<Agency>();
     const intelFor = labelFor
       ? null
       : await db
           .prepare(
             `SELECT a.* FROM agencies a WHERE a.intel_stale = 1 AND a.website IS NOT NULL
-             AND EXISTS (SELECT 1 FROM watched_pages p WHERE p.agency_id = a.id AND p.content_text IS NOT NULL)
+             AND EXISTS (SELECT 1 FROM watched_pages p WHERE p.agency_id = a.id AND p.content_text IS NOT NULL AND p.content_text != '')
              AND NOT EXISTS (SELECT 1 FROM watched_pages p WHERE p.agency_id = a.id AND p.last_checked_at IS NULL)
+             AND ${NOT_SKIPPED}
              ORDER BY a.id LIMIT 1`,
           )
           .first<Agency>();
     const target = labelFor ?? intelFor;
     if (!target) break;
-    if (!(await takeAiCall(db, env, true))) {
-      log.push('AI daily budget reached');
+    if (!(await takeAiCall(db, env, true, reserve))) {
+      log.push('AI daily budget reached (rest kept for the morning next steps)');
       break;
     }
     try {
@@ -498,7 +522,12 @@ async function crawlTick(db: D1Database, env: IntelEnv): Promise<string> {
       else log.push(`${target.name}: intel ${(await buildIntel(db, env, target)) ? 'updated' : 'skipped'}`);
     } catch (err) {
       if (err instanceof AiUnavailableError) {
-        log.push(err.message);
+        // Park this agency for a few hours so one failing site cannot use up the night's AI calls.
+        await db
+          .prepare(`INSERT INTO job_locks (name, until) VALUES (?, datetime('now', '+6 hours')) ON CONFLICT(name) DO UPDATE SET until = excluded.until`)
+          .bind(`skip:${target.id}`)
+          .run();
+        log.push(`${target.name}: ${err.message}`);
         break;
       }
       throw err;
