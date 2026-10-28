@@ -58,6 +58,14 @@ const TabBar: FC<{ active: Active; nav: Nav }> = ({ active, nav }) => (
   </nav>
 );
 
+// The chosen theme lives in this browser only. Without a choice the system setting applies.
+// Runs in <head> so the page never flashes the wrong theme; the click handler waits for the button.
+const THEME_BOOT = `(function(){var d=document.documentElement,k='theme';
+try{var t=localStorage.getItem(k);if(t==='light'||t==='dark')d.setAttribute('data-theme',t);}catch(e){}
+document.addEventListener('DOMContentLoaded',function(){var b=document.getElementById('theme-toggle');if(!b)return;
+b.addEventListener('click',function(){var cur=d.getAttribute('data-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');
+var next=cur==='dark'?'light':'dark';d.setAttribute('data-theme',next);try{localStorage.setItem(k,next);}catch(e){}});});})();`;
+
 export const Layout: FC<{ title: string; active?: Active; nav?: Nav; search?: string; topbar?: Child; children?: Child }> = ({
   title,
   active = '',
@@ -73,6 +81,7 @@ export const Layout: FC<{ title: string; active?: Active; nav?: Nav; search?: st
       <meta name="color-scheme" content="light dark" />
       <title>{title} · Agency Tracker</title>
       <link rel="stylesheet" href={`/app.css?v=${CSS_VERSION}`} />
+      <script dangerouslySetInnerHTML={{ __html: THEME_BOOT }} />
     </head>
     <body>
       <div class="app">
@@ -87,6 +96,14 @@ export const Layout: FC<{ title: string; active?: Active; nav?: Nav; search?: st
               <input class="input" type="search" name="q" value={search ?? ''} placeholder="Search agencies, contacts or notes…" aria-label="Search agencies" />
             </form>
             {topbar}
+            <button type="button" class="btn btn--icon btn--quiet theme-toggle" id="theme-toggle" aria-label="Switch between light and dark mode" title="Light / dark mode">
+              <span class="t-moon">
+                <Icon name="moon" lg />
+              </span>
+              <span class="t-sun">
+                <Icon name="sun" lg />
+              </span>
+            </button>
           </header>
           <div class="content">{children}</div>
         </div>

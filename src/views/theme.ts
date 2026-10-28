@@ -2,7 +2,7 @@
 // (design-system/). Do not edit by hand: run `npm run build:theme`.
 // Served at /app.css so it is cached once rather than inlined on every page.
 
-export const CSS_VERSION = '1cc631f1c1';
+export const CSS_VERSION = 'a9107a97bc';
 
 export const CSS = String.raw`
 /* Generated from the Agency Tracker design system: tokens.json + components/bundle.css. */
@@ -642,5 +642,15 @@ details.menu > summary { color: inherit; }
   .due-strip .actions .btn { width: 100%; height: 40px; }
   .toolbar .right { margin-left: 0; width: 100%; }
   .kv dd { text-align: left; }
+}
+
+/* Light / dark toggle in the top bar: show the moon in light mode, the sun in dark mode. */
+.theme-toggle { flex: none; margin-left: auto; }
+.theme-toggle .t-sun { display: none; }
+[data-theme="dark"] .theme-toggle .t-sun { display: inline-flex; }
+[data-theme="dark"] .theme-toggle .t-moon { display: none; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .theme-toggle .t-sun { display: inline-flex; }
+  :root:not([data-theme="light"]) .theme-toggle .t-moon { display: none; }
 }
 `;
