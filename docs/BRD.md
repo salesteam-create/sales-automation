@@ -46,7 +46,7 @@ Two fields. **Lead Status** sets the follow-up timing. **Status** drives the das
 | Hot, Warm | +7 days, +15 days, +30 days, then monthly |
 | Future fit, Education | Every 30 days |
 | Cold | Every 90 days (light check; the sequence tool handles emails) |
-| Won | None. Won agencies are active partners and do not appear in the daily feed |
+| Won | None automatically. A follow-up date set by hand (or taken from meeting notes) still shows on Today |
 | Disqualified | None. The website is still monitored and a big change can prompt a "worth reopening?" suggestion |
 
 **Rules**
