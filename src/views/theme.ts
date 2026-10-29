@@ -2,7 +2,7 @@
 // (design-system/). Do not edit by hand: run `npm run build:theme`.
 // Served at /app.css so it is cached once rather than inlined on every page.
 
-export const CSS_VERSION = 'a9107a97bc';
+export const CSS_VERSION = '378f1c8ac0';
 
 export const CSS = String.raw`
 /* Generated from the Agency Tracker design system: tokens.json + components/bundle.css. */
@@ -652,5 +652,12 @@ details.menu > summary { color: inherit; }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .theme-toggle .t-sun { display: inline-flex; }
   :root:not([data-theme="light"]) .theme-toggle .t-moon { display: none; }
+}
+
+/* Keep the sidebar in place while the page scrolls (desktop only; phones use the bottom tab bar).
+   overflow: clip on the shell keeps its rounded corners without breaking position: sticky. */
+.app { overflow: clip; }
+@media (min-width: 901px) {
+  .side { position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto; }
 }
 `;

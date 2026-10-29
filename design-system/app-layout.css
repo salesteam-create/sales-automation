@@ -75,3 +75,10 @@ details.menu > summary { color: inherit; }
   :root:not([data-theme="light"]) .theme-toggle .t-sun { display: inline-flex; }
   :root:not([data-theme="light"]) .theme-toggle .t-moon { display: none; }
 }
+
+/* Keep the sidebar in place while the page scrolls (desktop only; phones use the bottom tab bar).
+   overflow: clip on the shell keeps its rounded corners without breaking position: sticky. */
+.app { overflow: clip; }
+@media (min-width: 901px) {
+  .side { position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto; }
+}
