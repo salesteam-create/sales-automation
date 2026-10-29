@@ -18,7 +18,7 @@ export interface Nav {
 export async function loadNav(db: D1Database, today: string): Promise<Nav> {
   const row = await db
     .prepare(
-      `SELECT (SELECT COUNT(*) FROM agencies WHERE next_followup_date IS NOT NULL AND next_followup_date <= ? AND status != 'Won') AS due,
+      `SELECT (SELECT COUNT(*) FROM agencies WHERE next_followup_date IS NOT NULL AND next_followup_date <= ?) AS due,
               (SELECT COUNT(*) FROM agencies) AS total,
               (SELECT COUNT(*) FROM import_issues WHERE resolved = 0) AS issues`,
     )
@@ -74,8 +74,8 @@ export async function loadDashboard(db: D1Database, range: Range, today: string)
       )
       .bind(...rangeBinds)
       .all<Agency>(),
-    db.prepare(`SELECT * FROM agencies WHERE next_followup_date < ? AND status != 'Won' ORDER BY next_followup_date, name`).bind(today).all<Agency>(),
-    db.prepare(`SELECT * FROM agencies WHERE next_followup_date = ? AND status != 'Won' ORDER BY name`).bind(today).all<Agency>(),
+    db.prepare(`SELECT * FROM agencies WHERE next_followup_date < ? ORDER BY next_followup_date, name`).bind(today).all<Agency>(),
+    db.prepare(`SELECT * FROM agencies WHERE next_followup_date = ? ORDER BY name`).bind(today).all<Agency>(),
     pendingSuggestions(db),
     recentChanges(db, 24),
     db
@@ -125,11 +125,11 @@ export async function loadFeed(db: D1Database, today: string): Promise<Feed> {
   const weekAhead = addDays(today, 7);
   const weekBack = addDays(today, -6);
   const [overdue, dueToday, upcoming, completed, suggestions, webUpdates] = await Promise.all([
-    db.prepare(`SELECT * FROM agencies WHERE next_followup_date < ? AND status != 'Won' ORDER BY next_followup_date, name`).bind(today).all<Agency>(),
-    db.prepare(`SELECT * FROM agencies WHERE next_followup_date = ? AND status != 'Won' ORDER BY name`).bind(today).all<Agency>(),
+    db.prepare(`SELECT * FROM agencies WHERE next_followup_date < ? ORDER BY next_followup_date, name`).bind(today).all<Agency>(),
+    db.prepare(`SELECT * FROM agencies WHERE next_followup_date = ? ORDER BY name`).bind(today).all<Agency>(),
     db
       .prepare(
-        `SELECT * FROM agencies WHERE next_followup_date > ? AND next_followup_date <= ? AND status != 'Won'
+        `SELECT * FROM agencies WHERE next_followup_date > ? AND next_followup_date <= ?
          ORDER BY next_followup_date, name`,
       )
       .bind(today, weekAhead)

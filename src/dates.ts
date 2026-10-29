@@ -56,3 +56,37 @@ export function followupText(day: string | null | undefined, today: string): str
   }
   return relativeDay(day, today);
 }
+
+const NUMBER_WORDS: Record<string, number> = {
+  a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  eleven: 11, twelve: 12, couple: 2, 'a couple of': 2, few: 3, 'a few': 3,
+};
+const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+
+// Reads a follow-up time out of plain notes ("call in two days", "next week", "on Monday") as a date after `today`.
+// A safety net for when the AI leaves the date empty; returns the earliest date mentioned, or null.
+export function dateFromText(text: string, today: string): string | null {
+  const t = text.toLowerCase().replace(/[’']/g, "'");
+  const found: string[] = [];
+  const num = (w: string) => (/^\d+$/.test(w) ? Number(w) : NUMBER_WORDS[w.trim()]);
+  const amount = String.raw`(\d+|a couple of|a few|couple|few|an|a|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)`;
+
+  if (/\bday after tomorrow\b/.test(t)) found.push(addDays(today, 2));
+  else if (/\btomorrow\b/.test(t)) found.push(addDays(today, 1));
+  for (const [unit, days] of [['day', 1], ['week', 7], ['month', 30]] as const) {
+    for (const m of t.matchAll(new RegExp(String.raw`\b(?:in|after|within)\s+${amount}\s+(?:more\s+)?${unit}s?\b`, 'g'))) {
+      const n = num(m[1]);
+      if (n) found.push(addDays(today, n * days));
+    }
+  }
+  if (/\bnext week\b/.test(t)) found.push(addDays(today, 7));
+  if (/\bnext month\b/.test(t)) found.push(addDays(today, 30));
+  const dow = new Date(today + 'T00:00:00Z').getUTCDay();
+  const nextWeekday = (target: number) => addDays(today, ((target - dow + 7) % 7) || 7);
+  if (/\bend of (?:the |this )?week\b/.test(t)) found.push(nextWeekday(5));
+  WEEKDAYS.forEach((d, i) => {
+    if (new RegExp(String.raw`\b${d}\b`).test(t)) found.push(nextWeekday(i));
+  });
+  const future = found.filter((d) => d > today).sort();
+  return future[0] ?? null;
+}

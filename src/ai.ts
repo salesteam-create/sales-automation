@@ -166,7 +166,8 @@ ${input.notes}
 """
 
 Summarise the new notes for the salesperson. Extract interest level, services they need, projects mentioned and objections.
-Give one concrete next step. Set next_step_date only if the notes mention or clearly imply a time ("next week", "in May",
+Give one concrete next step. Count any relative time ("in two days", "next week") from today, ${input.today}, not from
+the meeting date. Set next_step_date only if the notes mention or clearly imply a time ("next week", "in May",
 "after the 20th"); convert it to a date after today. Suggest a Status/Lead Status change only if the notes clearly justify it,
 keep it to an allowed combination, and explain why in one sentence. Otherwise leave the suggestion fields null.`;
 

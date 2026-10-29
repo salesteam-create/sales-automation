@@ -589,7 +589,11 @@ export interface ListFilters {
   country?: string;
   overdue?: boolean;
   deal?: boolean;
+  per?: number; // rows per page; 25 unless "Show more" or "Show all" was used
 }
+
+// "Show all" asks for this many rows; well above the number of agencies.
+export const ALL_ROWS = 1000;
 
 // Keeps every filter when only one of them changes.
 function listUrl(f: ListFilters, sort: Sort, page: number, over?: Partial<Record<string, string | undefined>>): string {
@@ -601,6 +605,7 @@ function listUrl(f: ListFilters, sort: Sort, page: number, over?: Partial<Record
     country: f.country,
     overdue: f.overdue ? '1' : undefined,
     deal: f.deal ? '1' : undefined,
+    per: f.per && f.per !== 25 ? String(f.per) : undefined,
     sort: sort === 'next' ? undefined : sort,
     page: page > 1 ? String(page) : undefined,
     ...over,
@@ -798,6 +803,16 @@ export const AgencyListPage: FC<
               <span class="meta">
                 Showing {from}–{to} of {total}
               </span>
+              {page === 1 && to < total && (
+                <span style="display:flex;gap:8px;flex-wrap:wrap">
+                  <a class="btn btn--sm" href={listUrl({ ...filters, per: pageSize + 25 }, sort, 1)}>
+                    Show {Math.min(25, total - to)} more
+                  </a>
+                  <a class="btn btn--sm btn--quiet" href={listUrl({ ...filters, per: ALL_ROWS }, sort, 1)}>
+                    Show all {total}
+                  </a>
+                </span>
+              )}
               {pages > 1 && (
                 <nav class="pager" style="margin-left:auto" aria-label="Pages">
                   {page > 1 && (
@@ -1680,8 +1695,16 @@ export const LogPage: FC<Base & { agency: Agency; draft?: { date: string; type: 
 );
 
 export const ReviewPage: FC<
-  Base & { agency: Agency; date: string; type: string; notes: string; analysis: NoteAnalysis | null; aiError?: string | null }
-> = ({ agency, date, type, notes, analysis: an, aiError, today, nav }) => (
+  Base & {
+    agency: Agency;
+    date: string;
+    type: string;
+    notes: string;
+    analysis: NoteAnalysis | null;
+    suggestedDate?: string | null;
+    aiError?: string | null;
+  }
+> = ({ agency, date, type, notes, analysis: an, suggestedDate, aiError, today, nav }) => (
   <Layout title={`Review: ${agency.name}`} active="agencies" nav={nav}>
     <p class="crumb">
       <a href={`/agencies/${agency.id}`}>{agency.name}</a>
@@ -1731,7 +1754,7 @@ export const ReviewPage: FC<
             </label>
             <label class="field">
               <span class="lbl">Next follow-up date</span>
-              <input class="input" type="date" name="next_step_date" value={an?.next_step_date ?? ''} min={today} />
+              <input class="input" type="date" name="next_step_date" value={an?.next_step_date ?? suggestedDate ?? ''} min={today} />
               <span class="hint">Leave empty for the standard timing.</span>
             </label>
           </div>

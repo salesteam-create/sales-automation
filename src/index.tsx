@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono';
 import { AiUnavailableError, analyzeNote, type NoteAnalysis } from './ai';
-import { addDays, isValidDay, todayIST } from './dates';
+import { dateFromText, addDays, isValidDay, todayIST } from './dates';
 import {
   changeStatus,
   createSuggestion,
@@ -39,6 +39,7 @@ import {
   ReviewPage,
   type FeedTab,
   type ImportIssueRow,
+  ALL_ROWS,
 } from './views/pages';
 
 export interface Env extends IntelEnv {
@@ -107,12 +108,14 @@ app.get('/agencies', async (c) => {
     country: c.req.query('country') || undefined,
     overdue: c.req.query('overdue') === '1',
     deal: c.req.query('deal') === '1',
+    // Rows per page: 25 by default, grown by "Show more" or "Show all" so the list extends in place.
+    per: Math.min(ALL_ROWS, Math.max(25, Number(c.req.query('per')) || 25)),
   };
   const sortParam = c.req.query('sort');
   const sort: Sort = isSort(sortParam) ? sortParam : 'next';
   const page = Math.max(1, Number(c.req.query('page')) || 1);
   const [list, countries, nav] = await Promise.all([
-    listAgencies(c.env.DB, { ...filters, today, sort, page }),
+    listAgencies(c.env.DB, { ...filters, today, sort, page, pageSize: filters.per }),
     listCountries(c.env.DB),
     loadNav(c.env.DB, today),
   ]);
@@ -449,6 +452,9 @@ app.post('/agencies/:id/log/analyze', async (c) => {
       aiError = err.message;
     }
   }
+  // When the AI gives no date (or is skipped), read one from the notes ("call in two days") so the reminder is not lost.
+  const noteDate = dateFromText(notes, today);
+  if (analysis && !analysis.next_step_date && noteDate) analysis.next_step_date = noteDate;
   return c.html(
     <ReviewPage
       agency={agency}
@@ -456,6 +462,7 @@ app.post('/agencies/:id/log/analyze', async (c) => {
       type={type}
       notes={notes}
       analysis={analysis}
+      suggestedDate={noteDate}
       aiError={aiError}
       today={today}
       nav={await loadNav(c.env.DB, today)}
